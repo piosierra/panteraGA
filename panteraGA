@@ -46,9 +46,31 @@ options(warn = 0)
 cmdArgs <- commandArgs(trailingOnly = FALSE)
 scriptPath <- normalizePath(dirname(sub("^--file=", "",
                                             cmdArgs[grep("^--file=",
-                                                         cmdArgs)])))[1]
+                                           cmdArgs)])))[1]
+
+ 
+
+if (length(commandArgs(trailingOnly = T)) >0) {
+  
+  if (commandArgs(trailingOnly = T)[1] == "install") {
+    fileconn <- file(file.path(scriptPath,".pantera.config"))
+    writeLines(commandArgs(trailingOnly = T)[2], fileconn)
+    close(fileconn)
+    quit()
+  } 
+} 
+if (file.exists(file.path(scriptPath,".pantera.config"))==F ) {
+    cat("Provide path to RepeatMasker folder:\n$ panteraGA install path/to/RepeatMasker/folder\n")
+    quit()
+  }
+
+    fileconn <-  file(file.path(scriptPath,".pantera.config"))
+    rmpath <- paste0(readLines(fileconn),"/Libraries",collapse="")
+    close(fileconn)
+    
 
 
+  
 if (!file.exists(file.path(scriptPath, "Rlibs"))) {
   dir.create(file.path(scriptPath, "Rlibs"))
 }
@@ -83,55 +105,55 @@ get_libs <- function() {
 
   if (suppressPackageStartupMessages(!require("this.path", quietly = TRUE))) {
     lx("Intalling package [this.path]")
-    install.packages("this.path") #
+    install.packages("this.path", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("getopt", quietly = TRUE))) {
     lx("Intalling package [getopt]")
-    install.packages("getopt") #
+    install.packages("getopt", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("parallel", quietly = TRUE))) {
     lx("Intalling package [parallel]")
-    install.packages("parallel") #
+    install.packages("parallel", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("qualV", quietly = TRUE))) {
     lx("Intalling package [qualV]")
-    install.packages("qualV") #
+    install.packages("qualV", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("ips", quietly = TRUE))) {
     lx("Intalling package [ips]")
-    install.packages("ips") #
+    install.packages("ips", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("BiocManager", quietly = TRUE))) {
     lx("Intalling package [BiocManager]")
-    install.packages("BiocManager") #
+    install.packages("BiocManager", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("Biostrings", quietly = TRUE))) {
     lx("Intalling package [Biostrings]")
-    BiocManager::install("Biostrings") #
+    BiocManager::install("Biostrings", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("stringi", quietly = TRUE))) {
     lx("Intalling package [stringi]")
-    install.packages("stringi") #
+    install.packages("stringi", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("ape", quietly = TRUE))) {
     lx("Intalling package [ape]")
-    install.packages("ape") #
+    install.packages("ape", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("LncFinder", quietly = TRUE))) {
     lx("Intalling package [LncFinder]")
-    install.packages("LncFinder") #
+    install.packages("LncFinder", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("xgboost", quietly = TRUE))) {
     lx("Intalling package [xgboost]")
-    install.packages("xgboost") #
+    install.packages("xgboost", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("quantmod", quietly = TRUE))) {
     lx("Intalling package [quantmod]")
-    install.packages("quantmod") #
+    install.packages("quantmod", verbose =F) #
   }
   if (suppressPackageStartupMessages(!require("data.table", quietly = TRUE))) {
     lx("Intalling package [data.table]")
-    install.packages("data.table") #
+    install.packages("data.table", verbose =F) #
   }
 
 }
@@ -446,7 +468,8 @@ if (!file.exists(file.path(this.dir(), "model/typesnames"))) {
 
 lx(paste("pantera path:", this.path()))
 lx(paste("1aln file:", opt$sv_file))
-lx(paste("Output:", opt$output_folder))
+lx(paste("RepeatMasker folder:", rmpath))
+lx(paste("Output folder:", opt$output_folder))
 lx(paste("Threads to use:", opt$threads))
 lx(paste("Cores detected:", detectCores()))
 lx(paste("Min. size:", opt$min_size))
@@ -791,8 +814,8 @@ classify_tes <- function() {
       "getorf -sequence ",
       file,
       " --outseq temp.orfs -minsize 300 &>/dev/null; blastp -num_threads ",detectCores()," -query temp.orfs -db ",
-      this.dir(),
-      "/libs/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
+      rmpath,
+      "/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
     )
   )
   lx("Reading data")
@@ -1089,7 +1112,7 @@ stats_tes <- function() {
   tes[,name:=paste0(">",name, collapse = ""), .I]
   wfasta(tes[, c("name", "seq")], paste0(opt$lib_name, "-pantera-final.fa"))
   wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-pass.fa"))
-  wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
+ # wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
   stats_data <- tes[,c("name", "cluster", "tsd_l","tsd_c","tsd_m","pass","lente","type","pa",
                        "length","lgap","rgap","orf1","orf2","orf3","maxRep")]
   ### Last fixes
@@ -1111,7 +1134,8 @@ cleanup <- function() {
   unlink("loop_2", recursive = TRUE)
   unlink("orfs.tbl")
   unlink("pantera_lib_0.fa")
-  file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
+  unlink("segments_candidates.fa")
+ # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
   unlink("temp.orfs")
   unlink("*consensi*")
   setwd(current)
