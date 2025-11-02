@@ -20,6 +20,8 @@ to build with them a TE library. It benefits of the amazing speed of [**FastGA**
 
 [emboss](https://emboss.sourceforge.net/download/#Stable/) 
 
+In adition **panteraGA** requires [RepeatMasker](https://www.repeatmasker.org/RepeatMasker/) installed in the system.
+
 **pantera** has been tested in Linux with R 4.5.1
 
 **pantera** needs several R packages in your system, if they are not found the first time it runs it will be slower as it will proceed to install them.
@@ -46,13 +48,11 @@ For more options just use:
 ```
 
 ### 3 Content of the output folder
-```
-Myspecies-pantera-final.fa  Myspecies-pantera-final.stats  LmiMyspeciesc-pantera-pass.fa  pantera.log
-```
-- `pantera-pass.fa` Final filtered library (recomended to use this one)
-- `pantera-final.fa` Final unfiltered library.
-- `pantera-final.stats` Stats for the families found.
-- `pantera.log` Runtime log.
+
+- `Myspecies-pantera-pass.fa` Final filtered library (recomended to use this one)
+- `Myspecies-pantera-final.fa` Final unfiltered library.
+- `Myspecies-pantera-final.stats` Stats for the families found.
+- `Myspecies-pantera.log` Runtime log.
 
 
 
