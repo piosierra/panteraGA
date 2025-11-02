@@ -28,7 +28,7 @@ In adition **panteraGA** requires [RepeatMasker](https://www.repeatmasker.org/Re
 
 
 ### 1- Installing
-Simply clone the repository. Then configure **panteraGA** with the path to your RepeatMasker installation:
+Simply download the last release and then configure **panteraGA** with the path to your RepeatMasker installation:
 ```
 ./panteraGA install path_to_RepeatMasker_folder
 ```
