@@ -1113,14 +1113,16 @@ stats_tes <- function() {
   wfasta(tes[, c("name", "seq")], paste0(opt$lib_name, "-pantera-final.fa"))
   wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-pass.fa"))
  # wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
-  stats_data <- tes[,c("name", "cluster", "tsd_l","tsd_c","tsd_m","pass","lente","type","pa",
-                       "length","lgap","rgap","orf1","orf2","orf3","maxRep")]
+  stats_data <- tes[,c("name","lente","pass", "cluster", "tsd_l","tsd_c","tsd_m","type",
+                       "length","lgap","rgap","pa","orf1","orf2","orf3","maxRep")]
   ### Last fixes
-  stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0, .I]
+  stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0]
+  stats_data[pa < 10,  pa :="Yes"]
+  stats_data[pa != "Yes",  pa :=""]
   
-  colnames(stats_data) <- c("name", "cluster_size", "TSD_length","TSD_confidence","TSD_motif","pass","TE_len", 
-                            "struct_type","polyA","struct_len","left_gap",
-                            "right_gap","orf1","orf2","orf3","maxTR")
+  colnames(stats_data) <- c("name","TE_len","pass", "cluster_size", "TSD_length","TSD_confidence","TSD_motif", 
+                            "struct_type","struct_len","left_gap",
+                            "right_gap","polyA","orf1","orf2","orf3","maxTR")
 
   fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats"), 
          quote =  F, row.names = F, sep ="\t")
