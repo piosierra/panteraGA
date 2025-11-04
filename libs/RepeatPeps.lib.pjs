@@ -1,0 +1,22 @@
+{
+  "version": "1.2",
+  "dbname": "RepeatPeps.lib",
+  "dbtype": "Protein",
+  "db-version": 5,
+  "description": "libs/RepeatPeps.lib",
+  "number-of-letters": 16150283,
+  "number-of-sequences": 18011,
+  "last-updated": "2023-10-18T09:40:00",
+  "number-of-volumes": 1,
+  "bytes-total": 19568755,
+  "bytes-to-cache": 16312495,
+  "files": [
+    "RepeatPeps.lib.pdb",
+    "RepeatPeps.lib.phr",
+    "RepeatPeps.lib.pin",
+    "RepeatPeps.lib.pot",
+    "RepeatPeps.lib.psq",
+    "RepeatPeps.lib.ptf",
+    "RepeatPeps.lib.pto"
+  ]
+}
