@@ -1,38 +1,8 @@
 #!/usr/bin/env Rscript
 
-# First version using FastGA data.
+# First version using FastGA alignments.
 # Improved stats and recovery of TEs
-# Version starting directly from an alignment of two haplotypes
-# Cleaned code. Moved to 0.5. Removed surplus options.
-# Special version for the VGP project.
-# Updates to filter 
-# 0.5.2 fix for segment dups
-# 0.6.0 Name changed.
-# 0.6.1 Included new method to find the edges. TSDs returned. Consensus includes
-# now N in positions with no consensus but enough saturation.
-# 0.7.0 Numerous improvements in filters and Unknown recovery
-# 0.7.1 small fix on last filters
-# 0.7.2 Back to cd-hit. Small LINEs removal improved. Short TIRs detection.
 
-# TODO 
-# Create an special type of TSD check for satellites, when the TSD maps to the
-# other edge (as series of tandem repeats)
-# 
-# Remove also "identical" sequences, not only fragments. 
-#
-# Don't make "unknown" all low Probability classified. Depending on the type low
-# prob could be enough (Poseidon) Maybe establish a cut point depending on the rest.
-#
-# The classifier has to be based also on the domains search. Not just homology. 
-# One way to reduce load would be to run it only on the sequences which lack a 
-# classification (but with large orf?)
-#
-# Poseidon, Neptune, Penelope, might need special filtering
-# Make better TIR finder. Longest subsequence. Similar to rotation algorithm.
-
-# > lcs <- LCS(strsplit("ACACTGGTCAACAAATTTTCAAAAGTTGTTTGTTTCTG","")[[1]], strsplit("ACACTGGTCAACAGCCAAAATGTTTCGGGCATCAAACC","")[[1]])
-# > paste0(lcs$LCS,collapse = "")
-# This works!
 
 pantera_version <- "1.0.0"
 options(warn = 0)
@@ -40,7 +10,8 @@ options(warn = 0)
 
 ###
 ### Find the path of the script and create an Rlibs folder to store the 
-### required libraries if they are missing.
+### required libraries if they are missing in case the user has no persmission 
+### in the default R folder, common in HPC systems.
 ###
 
 cmdArgs <- commandArgs(trailingOnly = FALSE)
@@ -50,27 +21,7 @@ scriptPath <- normalizePath(dirname(sub("^--file=", "",
 
  
 
-if (length(commandArgs(trailingOnly = T)) >0) {
-  
-  if (commandArgs(trailingOnly = T)[1] == "install") {
-    fileconn <- file(file.path(scriptPath,".pantera.config"))
-    writeLines(commandArgs(trailingOnly = T)[2], fileconn)
-    close(fileconn)
-    quit()
-  } 
-} 
-if (file.exists(file.path(scriptPath,".pantera.config"))==F ) {
-    cat("Provide path to RepeatMasker folder:\n$ panteraGA install path/to/RepeatMasker/folder\n")
-    quit()
-  }
 
-    fileconn <-  file(file.path(scriptPath,".pantera.config"))
-    rmpath <- paste0(readLines(fileconn),"/Libraries",collapse="")
-    close(fileconn)
-    
-
-
-  
 if (!file.exists(file.path(scriptPath, "Rlibs"))) {
   dir.create(file.path(scriptPath, "Rlibs"))
 }
@@ -468,7 +419,6 @@ if (!file.exists(file.path(this.dir(), "model/typesnames"))) {
 
 lx(paste("pantera path:", this.path()))
 lx(paste("1aln file:", opt$sv_file))
-lx(paste("RepeatMasker folder:", rmpath))
 lx(paste("Output folder:", opt$output_folder))
 lx(paste("Threads to use:", opt$threads))
 lx(paste("Cores detected:", detectCores()))
@@ -814,8 +764,8 @@ classify_tes <- function() {
       "getorf -sequence ",
       file,
       " --outseq temp.orfs -minsize 300 &>/dev/null; blastp -num_threads ",detectCores()," -query temp.orfs -db ",
-      rmpath,
-      "/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
+      scriptPath,
+      "/libs/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
     )
   )
   lx("Reading data")
