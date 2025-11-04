@@ -2,13 +2,11 @@
 # Identification of transposable element families from whole genome alignments using FastGA
 
 This new version of [**pantera**](https://github.com/piosierra/pantera) extracts the polymorphisms found in a whole genome alignment 
-to build with them a TE library. It benefits of the amazing speed of [**FastGA**](https://github.com/thegenemyers/FASTGA) to generate TE libraries in just minutes for most species, and can handle large, over 10Gb genomes, in a few hours.
+and uses them to build a TE library. It benefits of the speed of the blazing fast whole genome aligner [**FastGA**](https://github.com/thegenemyers/FASTGA) to generate TE libraries in just minutes for most species, and can handle large, over 10Gb genomes, in a few hours.
 
 ### 0- Requirements
 
-**pantera** requires that several utilities are available on the path:
-
-[ONEcode](https://github.com/thegenemyers/ONEcode)
+In addition to FastGA to build the alignments, **pantera** requires that several utilities are available on the path:
 
 [alntools](https://github.com/richarddurbin/alntools)
 
@@ -20,17 +18,15 @@ to build with them a TE library. It benefits of the amazing speed of [**FastGA**
 
 [emboss](https://emboss.sourceforge.net/download/#Stable/) 
 
-In adition **panteraGA** requires [RepeatMasker](https://www.repeatmasker.org/RepeatMasker/) installed in the system.
-
 **pantera** has been tested in Linux with R 4.5.1
 
-**pantera** needs several R packages in your system, if they are not found the first time it runs it will be slower as it will proceed to install them.
+**pantera** needs several R packages in your system, if they are not found they will be installed during the first run, which will make it slower, subsequent runs will not require that and will be faster.
 
 
 ### 1- Installing
-Simply download the last release and then configure **panteraGA** with the path to your RepeatMasker installation:
+Simply download the last release and run panteraGA to install any missing R libraries.
 ```
-./panteraGA install path_to_RepeatMasker_folder
+./panteraGA
 ```
 
 ### 1- Aligning two genomes
@@ -53,6 +49,11 @@ For more options just use:
 - `Myspecies-pantera-final.fa` Final unfiltered library.
 - `Myspecies-pantera-final.stats` Stats for the families found.
 - `Myspecies-pantera.log` Runtime log.
+
+### Akwnoledgements
+Thanks to Arian Smit and Robert Hubley (Dfam, RepeatMasker, RepeatModeler) for allowing us make use of their curated peptides library in this release.
+
+
 
 
 

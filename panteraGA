@@ -1106,8 +1106,6 @@ cleanup <- function() {
 zones_interval <- 60
 zones_interval_overlap <- 30
 current <- getwd()
-segments_unique <- data.table(name = as.character(),
-                              seq = as.character())
 
 invisible(tryCatch({get_libs()}, error = function(err) {
   end_pantera(paste("Installing libs error ->",geterrmessage()))
@@ -1115,10 +1113,13 @@ invisible(tryCatch({get_libs()}, error = function(err) {
 invisible(tryCatch({opt <- read_pars()}, error = function(err) {
   end_pantera(paste("Reading parameters error ->",geterrmessage()))
   }))
-
 invisible(tryCatch({init_pantera()}, error = function(err) {
   end_pantera(paste("Initialization error ->",geterrmessage()))
   }))
+
+segments_unique <- data.table(name = as.character(),
+                              seq = as.character())
+
 invisible(tryCatch({segments_unique <- read_poly()}, error = function(err) {
   end_pantera(paste("Error reading 1aln ->",geterrmessage()))
   }))
