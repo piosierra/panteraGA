@@ -2,7 +2,7 @@
 # Identification of transposable element families from whole genome alignments using FastGA
 
 This new version of [**pantera**](https://github.com/piosierra/pantera) extracts the polymorphisms found in a whole genome alignment 
-and uses them to build a TE library. It benefits of the speed of the blazing fast whole genome aligner [**FastGA**](https://github.com/thegenemyers/FASTGA) to generate TE libraries in just minutes for most species, and can handle large, over 10Gb genomes, in a few hours.
+and uses them to build a TE library. It greatly benefits from the speed of the blazing fast whole genome aligner [**FastGA**](https://github.com/thegenemyers/FASTGA) to generate TE libraries in just minutes for most species, and can handle large, over 10Gb genomes, in a few hours.
 
 ### 0- Requirements
 

@@ -16,8 +16,8 @@ options(warn = 0)
 
 cmdArgs <- commandArgs(trailingOnly = FALSE)
 scriptPath <- normalizePath(dirname(sub("^--file=", "",
-                                            cmdArgs[grep("^--file=",
-                                           cmdArgs)])))[1]
+                                        cmdArgs[grep("^--file=",
+                                                     cmdArgs)])))[1]
 
 if (!file.exists(file.path(scriptPath, "Rlibs"))) {
   dir.create(file.path(scriptPath, "Rlibs"))
@@ -50,7 +50,7 @@ lx <- function(x) {
 
 # Installs the required libraries. Probably I should include some messages.
 get_libs <- function() {
-
+  
   if (suppressPackageStartupMessages(!require("this.path", quietly = TRUE))) {
     lx("Intalling package [this.path]")
     install.packages("this.path", verbose =F) #
@@ -103,7 +103,7 @@ get_libs <- function() {
     lx("Intalling package [data.table]")
     install.packages("data.table", verbose =F) #
   }
-
+  
 }
 
 # Reads parameters
@@ -133,17 +133,17 @@ read_pars <- function() {
     cat(gsub("\\] \\[","\\]\n\\[",getopt(spec, usage = TRUE)))
     q(status = 1)
   }
-
-    if (is.null(opt$verbose)) {
+  
+  if (is.null(opt$verbose)) {
     opt$verbose <- FALSE
   }
   
   if (is.null(opt$debug)) {
     opt$debug <- FALSE
   }
-    if (is.null(opt$sv_file)) {
+  if (is.null(opt$sv_file)) {
     stop("[--svfile|-1] missing")
-   }
+  }
   
   if (is.null(opt$output_folder)) {
     opt$output_folder <- "pantera_output"
@@ -212,11 +212,11 @@ ffasta <- function(f) {
   if (check == 0 | is.na(check)) {
     return(data.table(name = as.character(), seq = as.character()))
   } else {
-  fa_raw <- fread(f, header = F, fill = T, sep = "\n")
-  fa_raw[, h := grepl(">", V1)]
-  fa_oneline <- fa_raw[, .(paste0(V1, collapse = "")), by = rleid(h)]
-  return(data.table(name = fa_oneline[rep(c(TRUE, FALSE), length = .N)]$V1, 
-                    seq = fa_oneline[rep(c(FALSE, TRUE), length = .N)]$V1))
+    fa_raw <- fread(f, header = F, fill = T, sep = "\n")
+    fa_raw[, h := grepl(">", V1)]
+    fa_oneline <- fa_raw[, .(paste0(V1, collapse = "")), by = rleid(h)]
+    return(data.table(name = fa_oneline[rep(c(TRUE, FALSE), length = .N)]$V1, 
+                      seq = fa_oneline[rep(c(FALSE, TRUE), length = .N)]$V1))
   }
 }
 
@@ -291,7 +291,7 @@ parseONEview <- function(f) {
   if (check == 0 | is.na(check)) {
     end_pantera(".1aln file missing")
   } else {
-   system(paste0("svfind -x 12 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa -b ",opt$output_folder,"/",opt$lib_name,"hapb ", f, " > /dev/null 2>&1"))
+    system(paste0("svfind -x 12 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa -b ",opt$output_folder,"/",opt$lib_name,"hapb ", f, " > /dev/null 2>&1"))
     ova <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa"), fill = T)
     ovb <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapb"), fill = T)
     ova[,f:="a"]
@@ -313,8 +313,8 @@ parseONEview <- function(f) {
     ovall <- ovall[seq_len >= opt$min_size & seq_len <= opt$max_size]
     lx(paste("Total segments filtered =", nrow(ovall)))
     if (opt$flanking == 100) {
-    kneedle_data <- data.table(flanks=c(ovall$flank_r,ovall$flank_l))[,b:=flanks %/% 100][,.N,b][order(b)]
-    opt$flanking <- tryCatch({kneedle(kneedle_data$b,kneedle_data$N)[1]*100},error = function(msg){return(2001)})
+      kneedle_data <- data.table(flanks=c(ovall$flank_r,ovall$flank_l))[,b:=flanks %/% 100][,.N,b][order(b)]
+      opt$flanking <- tryCatch({kneedle(kneedle_data$b,kneedle_data$N)[1]*100},error = function(msg){return(2001)})
     }
     lx(paste("Flanking sequences cutpoint = ", opt$flanking))
     ovcut <- ovall[flank_l>=opt$flanking & flank_r>=opt$flanking]
@@ -325,7 +325,7 @@ parseONEview <- function(f) {
     ovall[is.na(ov) ,ov:=1]
     ovall[ov < -seq_len ,ov:=1]
     ovall <- ovall[ov>0]
-   
+    
     unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
     unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
     
@@ -421,49 +421,49 @@ init_pantera <- function() {
              showWarnings = FALSE,
              recursive = T)
   sink(paste0(opt$output_folder, "/pantera.log"), split = opt$verbose) 
-lx(paste("panteraGA", pantera_version, "\n"))
-
-## Confirm dependencies are available
-if (!(nchar(Sys.which("mafft")) > 0)) {
-  end_pantera("mafft not found")
-} else {
-  mafft_exec <- Sys.which("mafft")
-}
-if (!(nchar(Sys.which("getorf")) > 0)) {
-  end_pantera("getorf not found")
-}
-if (!(nchar(Sys.which("blastn")) > 0)) {
-  end_pantera("blastn not found")
-}
-if (!(nchar(Sys.which("cd-hit-est")) > 0)) {
-  end_pantera("cd-hit-est not found")
-}
-if (!(nchar(Sys.which("svfind")) > 0)) {
-  end_pantera("svfind not found")
-}
-if (!(nchar(Sys.which("ONEview")) > 0)) {
-  end_pantera("ONEview not found")
-}
-
-if (!file.exists(file.path(this.dir(), "model/typesnames"))) {
-  end_pantera("Model not found.")
-}
-
-lx(paste("panteraGA path:", this.path()))
-lx(paste("1aln file:", opt$sv_file))
-lx(paste("Output folder:", opt$output_folder))
-lx(paste("Threads to use:", opt$threads))
-lx(paste("Cores detected:", detectCores()))
-lx(paste("Min. size:", opt$min_size))
-lx(paste("Max. size:", opt$max_size))
-lx(paste("Identity for clustering:", opt$identity))
-lx(paste("Identity for clustering 2:", opt$identity2))
-lx(paste("Min. sequences to create a consensus:", opt$min_cl))
-lx(paste("Max percentage of Ns:", opt$Ns))
-lx(paste("Max. size of cluster:", opt$cl_size))
-lx(paste("Minimum size of flanking sequences:", opt$flanking))
-
-return(0)
+  lx(paste("panteraGA", pantera_version, "\n"))
+  
+  ## Confirm dependencies are available
+  if (!(nchar(Sys.which("mafft")) > 0)) {
+    end_pantera("mafft not found")
+  } else {
+    mafft_exec <- Sys.which("mafft")
+  }
+  if (!(nchar(Sys.which("getorf")) > 0)) {
+    end_pantera("getorf not found")
+  }
+  if (!(nchar(Sys.which("blastn")) > 0)) {
+    end_pantera("blastn not found")
+  }
+  if (!(nchar(Sys.which("cd-hit-est")) > 0)) {
+    end_pantera("cd-hit-est not found")
+  }
+  if (!(nchar(Sys.which("svfind")) > 0)) {
+    end_pantera("svfind not found")
+  }
+  if (!(nchar(Sys.which("ONEview")) > 0)) {
+    end_pantera("ONEview not found")
+  }
+  
+  if (!file.exists(file.path(this.dir(), "model/typesnames"))) {
+    end_pantera("Model not found.")
+  }
+  
+  lx(paste("panteraGA path:", this.path()))
+  lx(paste("1aln file:", opt$sv_file))
+  lx(paste("Output folder:", opt$output_folder))
+  lx(paste("Threads to use:", opt$threads))
+  lx(paste("Cores detected:", detectCores()))
+  lx(paste("Min. size:", opt$min_size))
+  lx(paste("Max. size:", opt$max_size))
+  lx(paste("Identity for clustering:", opt$identity))
+  lx(paste("Identity for clustering 2:", opt$identity2))
+  lx(paste("Min. sequences to create a consensus:", opt$min_cl))
+  lx(paste("Max percentage of Ns:", opt$Ns))
+  lx(paste("Max. size of cluster:", opt$cl_size))
+  lx(paste("Minimum size of flanking sequences:", opt$flanking))
+  
+  return(0)
 }
 
 
@@ -476,7 +476,7 @@ read_poly <- function() {
            paste0(opt$output_folder, "/all_segments.fa"))
   }
   segments_unique[,len:=nchar(seq)]
-return(segments_unique)  
+  return(segments_unique)  
 }  
 
 # First pass, finds repeats but does not try to generate any consensus.  
@@ -491,26 +491,26 @@ find_repeats <- function() {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
         if (nrow(segment_u) >= opt$min_cl)  {
-      #    lx(paste0("Num. of segments zone ",start," - ",end," : ", nrow(segment_u)))
+          #    lx(paste0("Num. of segments zone ",start," - ",end," : ", nrow(segment_u)))
           segment_sets <- split(segment_u, 
                                 rep(1:(nrow(segment_u) %/% opt$cl_size +1), 
-                                length.out = nrow(segment_u), 
-                                each = ceiling(nrow(segment_u) / 
-                                               (nrow(segment_u) %/% 
-                                                opt$cl_size +1))))
+                                    length.out = nrow(segment_u), 
+                                    each = ceiling(nrow(segment_u) / 
+                                                     (nrow(segment_u) %/% 
+                                                        opt$cl_size +1))))
           candidates <- data.table(name = as.character(), 
                                    seq = as.character())
           for (ss in 1:length(segment_sets)) {
-       #     lx(paste0("Num. of segments zone ", start," - ", end," : cluster : ",ss))
+            #     lx(paste0("Num. of segments zone ", start," - ", end," : cluster : ",ss))
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
-            sg_clus <- cdhit1(sg, opt$identity)
-            sg_clus[,n:=.N,clus]
-            sg_clus <- sg_clus[n>=opt$min_cl]
-    
-            candidates <- rbindlist(list(candidates, 
-                  sg[name %in% sg_clus$name, 
-                     c("name", "seq")]))
+              sg_clus <- cdhit1(sg, opt$identity)
+              sg_clus[,n:=.N,clus]
+              sg_clus <- sg_clus[n>=opt$min_cl]
+              
+              candidates <- rbindlist(list(candidates, 
+                                           sg[name %in% sg_clus$name, 
+                                              c("name", "seq")]))
             }
           }
           if (nrow(candidates) > 0) {
@@ -559,7 +559,7 @@ find_repeats <- function() {
     mc.preschedule = FALSE,
     mc.cores = opt$threads
   )
-
+  
   lx(paste("Total sequences discarded:", sum(as.numeric(unlist(loop_exit)))))
   system(paste0("mv ../all_segments.fa ../pantera_lib_", round - 1, ".fa"))
   system("cat candidates*.fa > ../segments_candidates.fa")
@@ -568,124 +568,93 @@ find_repeats <- function() {
 
 # Second pass. Cluster and generate consensus. 
 cluster_results <- function() {
-
+  
   process_zone_2 <- function(zone) {
     start <- as.numeric(zone[1]) - zones_interval_overlap
     end <- as.numeric(zone[2]) + zones_interval_overlap
     discards <- 0
     if (start != end) {
-   #   lx(paste("Procesing segments:", start, "-", end))
+      #   lx(paste("Procesing segments:", start, "-", end))
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
-  #      lx(paste("Number of sequences:", nrow(segment_u)))
-          if (nrow(segment_u) >= opt$min_cl)  {
-            segment_sets <- split(segment_u, 
-                                  rep(1:(nrow(segment_u) %/% opt$cl_size +1), 
-                                      length.out = nrow(segment_u), 
-                                      each = ceiling(nrow(segment_u) / 
+        #      lx(paste("Number of sequences:", nrow(segment_u)))
+        if (nrow(segment_u) >= opt$min_cl)  {
+          segment_sets <- split(segment_u, 
+                                rep(1:(nrow(segment_u) %/% opt$cl_size +1), 
+                                    length.out = nrow(segment_u), 
+                                    each = ceiling(nrow(segment_u) / 
                                                      (nrow(segment_u) %/%
-                                                      opt$cl_size +1))))
-    #        lx(paste("Segment sets", start, "-", end, ":", length(segment_sets)))
-            consensi <- data.table(name = as.character(), 
-                                   seq = as.character())
-            for (ss in 1:length(segment_sets)) {
-              sg <- segment_sets[[ss]]
-              if (nrow(sg)>1) {
+                                                        opt$cl_size +1))))
+          #        lx(paste("Segment sets", start, "-", end, ":", length(segment_sets)))
+          consensi <- data.table(name = as.character(), 
+                                 seq = as.character())
+          for (ss in 1:length(segment_sets)) {
+            sg <- segment_sets[[ss]]
+            if (nrow(sg)>1) {
               sg_clus <- cdhit1(sg, opt$identity2)
               sg_clus[,n:=.N,clus]
               sg_clus <- sg_clus[n>=opt$min_cl]
               
-              # sg <- segment_sets[[ss]]
-              # sgrc <- data.table(name=sg$name, seq=rc(sg$seq))
-              # sgrc[,name:=paste0(name,"_RC")]
-              # sg_seq <- rbindlist(list(sg[,c("name","seq")],sgrc))
-              # set2clus <- DNAStringSet(sg_seq$seq)
-              # list_clust <- data.table(Clusterize(set2clus, 
-              #                                     cutoff = opt$identity2, 
-              #                                     verbose = F, 
-              #                                     penalizeGapLetterMatches = T, 
-              #                                     includeTerminalGaps = T,
-              #                                     processors = 1, 
-              #                                     minCoverage = -0.9))
-              # lx(paste("Segment sets", start, "-", end, ": clusters", 
-              #          length(unique(list_clust$cluster))))
-              # list_clust[,name:= sg_seq$name]
-              # list_clust[,name:=gsub("_RC","",name)]
-              # clusters <- list_clust[order(name)][,.(list(name)), cluster]
-              # clusters <- clusters[!duplicated(clusters$V1)]
-              # clusters[,n:=length(V1[[1]]), by=.I]
-              # clusters <- clusters[clusters$n>=opt$min_cl,] 
-
-          if ( nrow(sg_clus) > 0) {
-            for (u in unique(sg_clus$clus)) {
-              seqs_clust <- sg[name %in% unlist(sg_clus[clus==u]$name)]
-              clust_temp <- strsplit(seqs_clust$seq, "")
-              names(clust_temp) <- seqs_clust$name
-              seqs <- ape::as.DNAbin(clust_temp)
-              if (length(seqs) > 1) {
-                ali <- ips::mafft(seqs,
-                             #      method = "globalpair",
-                             #      maxiterate = 2,
-                             options = c("--adjustdirection"),
-                             ep = 0.123,
-                             thread = -1,
-                             exec = "mafft"
-                )
-                alim <- reformatDNA(ali)
-                cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
-                                                ambiguityMap = "-", 
-                                                threshold = cons_threshold))
-               
-                cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
-                dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
-                saturation <- unlist(lapply(dtMatrix[1:4],sum))/length(seqs)
-                conserv <- unlist(lapply(dtMatrix[1:4],max))/length(seqs)
-               # kclus <- kmeans(conserv,2)
-                consstring <- paste0(as.numeric(conserv>=cons_threshold+.4),collapse = "")
-               # good <- which(kclus$size == max(kclus$size), kclus$size)
-               # consstring <- paste0(kclus$cluster,collapse ="")
-                cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[1]
-                cons_e <- stri_locate_last_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[2]
-                edges <- data.table(l=stri_reverse(gsub("-","",substr(alim,1,cons_s-1))), r=gsub("-","",substr(alim,cons_e+1,nchar(alim[1]))))
-              #  tsds <- unlist(lapply(2:13,function(x){sum(diag(adist(substr(edges$r,1,x),stri_reverse(substr(edges$l,1,x)))))}))
-                tsds2 <- unlist(lapply(2:13,function(x){sum(substr(edges$r,1,x) == stri_reverse(substr(edges$l,1,x)))}))
-                tsd_len <- min(which(tsds2==max(tsds2),tsds2))+1
-                tsds_conf <- round(tsds2[tsd_len-1]/nrow(edges),2)
-                tsds_motif <- Biostrings::consensusString(Biostrings::DNAStringSet(c(substr(edges$r,1,tsd_len),stri_reverse(substr(edges$l,1,tsd_len)))), ambiguityMap=IUPAC_CODE_MAP,
-                                threshold=0.25, shift=0L, width=NULL)
-                ### End of exploration
-              
-                
-              } else {
-                cons <- toupper(paste0(unlist(as.character(seqs)), 
-                                       collapse = ""))
-              }
-              cons <- gsub("-","N",cons)
-              cons <- substr(cons,cons_s,cons_e)
-              cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
-              # lx(paste("cluster",u))
-              # lx(nrow(seqs_clust))
-              # lx(min(seqs_clust$len))
-              # lx(max(seqs_clust$len))
-              # lx(nchar(cons))
-              nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
-                            nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif,"@@")
-              consensi <- rbindlist(list(consensi, data.table(name = nam, 
-                                                              seq = cons)))
-            }
-          } 
-              }
-            }
-                  if (nrow(consensi) > 0) {
-                    wfasta(consensi, paste0("consensi_", start, "_",
-                                             end, ".fa"))
+              if ( nrow(sg_clus) > 0) {
+                for (u in unique(sg_clus$clus)) {
+                  seqs_clust <- sg[name %in% unlist(sg_clus[clus==u]$name)]
+                  clust_temp <- strsplit(seqs_clust$seq, "")
+                  names(clust_temp) <- seqs_clust$name
+                  seqs <- ape::as.DNAbin(clust_temp)
+                  if (length(seqs) > 1) {
+                    ali <- ips::mafft(seqs,
+                                      #      method = "globalpair",
+                                      #      maxiterate = 2,
+                                      options = c("--adjustdirection"),
+                                      ep = 0.123,
+                                      thread = -1,
+                                      exec = "mafft"
+                    )
+                    alim <- reformatDNA(ali)
+                    cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
+                                                                ambiguityMap = "-", 
+                                                                threshold = cons_threshold))
+                    
+                    ### TSD data
+                    cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
+                    dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
+                    saturation <- unlist(lapply(dtMatrix[1:4],sum))/length(seqs)
+                    conserv <- unlist(lapply(dtMatrix[1:4],max))/length(seqs)
+                    consstring <- paste0(as.numeric(conserv>=cons_threshold+.4),collapse = "")
+                    cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[1]
+                    cons_e <- stri_locate_last_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[2]
+                    edges <- data.table(l=stri_reverse(gsub("-","",substr(alim,1,cons_s-1))), r=gsub("-","",substr(alim,cons_e+1,nchar(alim[1]))))
+                    tsds2 <- unlist(lapply(2:13,function(x){sum(substr(edges$r,1,x) == stri_reverse(substr(edges$l,1,x)))}))
+                    tsd_len <- min(which(tsds2==max(tsds2),tsds2))+1
+                    tsds_conf <- round(tsds2[tsd_len-1]/nrow(edges),2)
+                    tsds_motif <- Biostrings::consensusString(Biostrings::DNAStringSet(c(substr(edges$r,1,tsd_len),stri_reverse(substr(edges$l,1,tsd_len)))), ambiguityMap=IUPAC_CODE_MAP,
+                                                              threshold=0.25, shift=0L, width=NULL)
+                    
+                    
+                  } else {
+                    cons <- toupper(paste0(unlist(as.character(seqs)), 
+                                           collapse = ""))
                   }
-            
-              }
+                  cons <- gsub("-","N",cons)
+                  cons <- substr(cons,cons_s,cons_e)
+                  cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
+                  nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
+                                nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif,"@@")
+                  consensi <- rbindlist(list(consensi, data.table(name = nam, 
+                                                                  seq = cons)))
+                }
+              } 
+            }
+          }
+          if (nrow(consensi) > 0) {
+            wfasta(consensi, paste0("consensi_", start, "_",
+                                    end, ".fa"))
+          }
+        }
       }
     }
-#    lx(paste("Zone:", start, "completed."))
+    #    lx(paste("Zone:", start, "completed."))
     return(discards)
   }
   
@@ -695,52 +664,47 @@ cluster_results <- function() {
   cons_threshold <- 0.4
   saturation_threshold <- 0.6
   opt$cl_size <- 1000
-    segments_unique <- ffasta("segments_candidates.fa")
-    if (nrow(segments_unique) > 0) {
-      lx(paste("Total Unique segments:", nrow(segments_unique)))
-      segments_unique <- segments_unique[!duplicated(segments_unique)]
-      segments_unique[, len := nchar(seq)]
-      segments_unique <- segments_unique[order(-len)]
-      lx(paste("Total Unique segments no dups:", nrow(segments_unique)))
-      lx(paste("Starting loop 2"))
-      lx(paste("Processing:", nrow(segments_unique), "segments"))
-      lx(paste("Largest segment:", max(segments_unique$len)))
-      lx(paste("Smallest segment:", min(segments_unique$len)))
-      dir.create("loop_2", showWarnings = FALSE)
-      setwd("loop_2")
-      # segments_unique[,csum:=cumsum(len)]
-      # segments_unique[,g:=csum %/% (opt$cl_size * 3000)]
-      # zones <- segments_unique[,.(min(len),max(len)),g][,2:3]
-      # zones <- asplit(zones,1)
-      
-      z <-
-        seq(
-          min(segments_unique$len),
-          max(segments_unique$len) + zones_interval,
-          zones_interval
-        )
-      if (length(z) < 2) {
-        zones <-
-          list(data.frame(
-            start = min(segments_unique$len),
-            end = max(segments_unique$len)
-          ))
-      } else {
-        zones <- asplit(data.frame(start = z[-length(z)], end = z[-1]), 1)
-      }
-      
- #     lx(paste("Processing:", length(zones), "windows"))
-      loop_exit <- mclapply(
-        rev(zones),
-        process_zone_2,
-        mc.preschedule = FALSE,
-        mc.cores = opt$threads
+  segments_unique <- ffasta("segments_candidates.fa")
+  if (nrow(segments_unique) > 0) {
+    lx(paste("Total Unique segments:", nrow(segments_unique)))
+    segments_unique <- segments_unique[!duplicated(segments_unique)]
+    segments_unique[, len := nchar(seq)]
+    segments_unique <- segments_unique[order(-len)]
+    lx(paste("Total Unique segments no dups:", nrow(segments_unique)))
+    lx(paste("Starting loop 2"))
+    lx(paste("Processing:", nrow(segments_unique), "segments"))
+    lx(paste("Largest segment:", max(segments_unique$len)))
+    lx(paste("Smallest segment:", min(segments_unique$len)))
+    dir.create("loop_2", showWarnings = FALSE)
+    setwd("loop_2")
+    z <-
+      seq(
+        min(segments_unique$len),
+        max(segments_unique$len) + zones_interval,
+        zones_interval
       )
-  #    lx(paste("Total sequences discarded:", 
-  #             sum(as.numeric(unlist(loop_exit)))))
-      system("cat consen*.fa >> ../all_consensi.fa")
-      setwd("..")
+    if (length(z) < 2) {
+      zones <-
+        list(data.frame(
+          start = min(segments_unique$len),
+          end = max(segments_unique$len)
+        ))
+    } else {
+      zones <- asplit(data.frame(start = z[-length(z)], end = z[-1]), 1)
     }
+    
+    #     lx(paste("Processing:", length(zones), "windows"))
+    loop_exit <- mclapply(
+      rev(zones),
+      process_zone_2,
+      mc.preschedule = FALSE,
+      mc.cores = opt$threads
+    )
+    #    lx(paste("Total sequences discarded:", 
+    #             sum(as.numeric(unlist(loop_exit)))))
+    system("cat consen*.fa >> ../all_consensi.fa")
+    setwd("..")
+  }
 }
 
 # Classify TE models
@@ -771,61 +735,61 @@ classify_tes <- function() {
   lx("Reading data")
   orfs <- fread("orfs.tbl", header = F)
   if (nrow(orfs) > 0) {
-  types <-
-    read.table(file.path(this.dir(), "model/typesnames"),
-               sep = "\n")
-  types <- types$V1
-  features <-
-    read.table(file.path(this.dir(), "model/featurenames"),
-               sep = "\n")
-  features <- features$V1
-  xgb.fit <-
-    xgb.load(file.path(this.dir(), "model/xgbmodel.big"))
-  lx("Processing")
-  orfs[, V1 := gsub("_[0-9]*$", "", V1)]
-  orfs[, prot := gsub(".*#", "", V2)]
-  
-  orfs_table <-
-    dcast(
-      orfs,
-      V1 ~ prot,
-      value.var = "V12",
-      fun.agg = function(x) {
-        suppressWarnings(max(x))
-      }
-    )
-  orfs_table[is.na(orfs_table), ] <- 0
-  orfs_table[orfs_table == -Inf, ] <- 0
-  
-  names <- orfs_table$V1
-  orfs_table$V1 <- NULL
-  
-  colnames(orfs_table) <- make.names(colnames(orfs_table))
-  if (sum(!(colnames(orfs_table) %in% features)) > 0) {
-    orfs_table[, colnames(orfs_table)[!(colnames(orfs_table) %in% features)] :=
-                 NULL]
+    types <-
+      read.table(file.path(this.dir(), "model/typesnames"),
+                 sep = "\n")
+    types <- types$V1
+    features <-
+      read.table(file.path(this.dir(), "model/featurenames"),
+                 sep = "\n")
+    features <- features$V1
+    xgb.fit <-
+      xgb.load(file.path(this.dir(), "model/xgbmodel.big"))
+    lx("Processing")
+    orfs[, V1 := gsub("_[0-9]*$", "", V1)]
+    orfs[, prot := gsub(".*#", "", V2)]
+    
+    orfs_table <-
+      dcast(
+        orfs,
+        V1 ~ prot,
+        value.var = "V12",
+        fun.agg = function(x) {
+          suppressWarnings(max(x))
+        }
+      )
+    orfs_table[is.na(orfs_table), ] <- 0
+    orfs_table[orfs_table == -Inf, ] <- 0
+    
+    names <- orfs_table$V1
+    orfs_table$V1 <- NULL
+    
+    colnames(orfs_table) <- make.names(colnames(orfs_table))
+    if (sum(!(colnames(orfs_table) %in% features)) > 0) {
+      orfs_table[, colnames(orfs_table)[!(colnames(orfs_table) %in% features)] :=
+                   NULL]
+    }
+    orfs_table[, features[!(features %in% colnames(orfs_table))] := 0]
+    setcolorder(orfs_table, features)
+    
+    lx("Get predictions")
+    xgb.pred2 = predict(xgb.fit, as.matrix(orfs_table), reshape = T)
+    xgb.pred2 = as.data.frame(xgb.pred2)
+    colnames(xgb.pred2) = types
+    xgb.pred2$prediction = apply(xgb.pred2, 1, function(x)
+      colnames(xgb.pred2)[which.max(x)])
+    xgb.pred2$prob = apply(xgb.pred2[1:ncol(xgb.pred2) - 1], 1, function(x)
+      max(x))
+    result <-
+      data.table(
+        Name = names,
+        Prediction = xgb.pred2$prediction,
+        Probability = xgb.pred2$prob
+      )
+    result <- result[, name := paste0(">", Name)]
   }
-  orfs_table[, features[!(features %in% colnames(orfs_table))] := 0]
-  setcolorder(orfs_table, features)
   
-  lx("Get predictions")
-  xgb.pred2 = predict(xgb.fit, as.matrix(orfs_table), reshape = T)
-  xgb.pred2 = as.data.frame(xgb.pred2)
-  colnames(xgb.pred2) = types
-  xgb.pred2$prediction = apply(xgb.pred2, 1, function(x)
-    colnames(xgb.pred2)[which.max(x)])
-  xgb.pred2$prob = apply(xgb.pred2[1:ncol(xgb.pred2) - 1], 1, function(x)
-    max(x))
-  result <-
-    data.table(
-      Name = names,
-      Prediction = xgb.pred2$prediction,
-      Probability = xgb.pred2$prob
-    )
-  result <- result[, name := paste0(">", Name)]
-  }
   
-
   lx("Merge")
   tes <- ffasta(file)
   if (exists("result")) {
@@ -848,7 +812,7 @@ classify_tes <- function() {
   final <- final[!duplicated(final$seq)]
   fwrite(final, paste0(file, ".statspre"), sep = "\t")
   return(final[, c("name", "seq", "cluster", "tsd_l","tsd_c","tsd_m")])
-
+  
 }
 
 # Obtain structural stats from TE models and recover or filter some.
@@ -867,8 +831,8 @@ stats_tes <- function() {
     orfs_list <- orfs[,first(ORF.Len), ORF.Stop]
     orfs_list_ordered <- orfs_list[order(-V1)]$V1
     return(data.table(orf1 = orfs_list_ordered[1],
-                    orf2 = orfs_list_ordered[2],
-                    orf3 = orfs_list_ordered[3]))
+                      orf2 = orfs_list_ordered[2],
+                      orf3 = orfs_list_ordered[3]))
   }
   orfs_tes <- rbindlist(mclapply(tes$seq,three_orfs, mc.cores = opt$threads))
   tes <- cbind(tes,orfs_tes)
@@ -909,152 +873,123 @@ stats_tes <- function() {
     good_ltr <- te_data[grepl("#LTR",qseqid) & type == "LTR" & lgap < 8 & rgap < 8 & length > 100]$qseqid
     good_tir <- te_data[grepl("#DNA",qseqid) & type == "TIR" & lgap < 8 & rgap < 8]$qseqid
     
-
-  
-
-   tes <- merge(tes[,name:=gsub(">","",name)], 
-                te_data[,c("qseqid","length","lgap","rgap", "type")], 
-                         by.x = "name", by.y = "qseqid", all.x=T)
-   tes[is.na(type), rgap :=0]
-   tes[is.na(type), lgap :=0]
-   tes[is.na(type), length :=0]
-   
-   tes <- merge(tes,te_data_rep, by.x = "name", by.y = "qseqid", all.x=T)
-   #  tes[cluster < (opt$min_cl + floor(sqrt(20000 %/% lente)/2) ), pass:=F]
-   #  cutoff <- quantile(tes$cluster, 0.8)
-   #  tes[cluster > cutoff, pass:= T]
-   #  tes[(length > (lente / 2)), pass:=F]
-   tes_count <- nrow(tes)
-   
-   tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq,paste0(strrep("A",opt$pas),"|",strrep("T",opt$pas))),function(x) {min(unlist(x))-1}))
-   tes$eas <- nchar(tes$seq)-unlist(lapply(stri_locate_all_regex(tes$seq,paste0(strrep("A",opt$pas),"|",strrep("T",opt$pas))),function(x) {max(unlist(x))}))
-   tes[,pa:=min(pas,eas), by=.I]
-   tes[substr(seq,1,5)=="AAAAA" | substr(seq,1,5)=="TTTTT" | substr(seq,lente-4,lente)=="AAAAA" | substr(seq,lente-4,lente)=="TTTTT" ,pa:=0, by = .I]
-   
-   good_line <- tes[grepl("LINE",name) & orf1 > 1600 & (pa < 10 | is.na(type) | (lgap >10 & rgap > 10)) ]$name
-   
-   # Find elements which share TIR or LTR to good ones.
-   te_data_mix <- merge(te_data_mix,
-                        tes[,c("name","lente", "orf1", "orf2", "orf3")]
-                        [,name:=gsub(">","",name)], by.x = "qseqid",
-                        by.y="name")
-   te_data_mix <- merge(te_data_mix,
-                        tes[,c("name","lente", "orf1", "orf2", "orf3")]
-                        [,name:=gsub(">","",name)], by.x = "sseqid",
-                        by.y="name")
-   te_data_mix[,lqgap:=.(min(qstart,qend)-1), by=.I]
-   te_data_mix[,rqgap:=.(lente.x-max(qstart,qend)), by=.I]
-   te_data_mix[,lsgap:=.(min(sstart,send)-1), by=.I]
-   te_data_mix[,rsgap:=.(lente.y-max(sstart,send)), by=.I]
-   ## Remove dups
-   te_data_mix[,cover:=length/min(lente.x,lente.y), by=.I]
-   te_data_dups <- te_data_mix[cover>0.98 & pident>99 & abs((lente.y-lente.x) / max(lente.y,lente.x))<0.01 ]
-   te_data_dups[,uname:=paste0(c(qseqid,sseqid)[order(c(qseqid,sseqid))], collapse = ""), .I]
-   te_data_dups <- te_data_dups[order(orf1.x-orf1.y)]
-   dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
-   te_data_mix <- te_data_mix[!(qseqid %in% dups_list)]
-   te_data_mix <- te_data_mix[!(sseqid %in% dups_list)]
- #  te_data_mix[,small:= (min(lente.x,lente.y) / max(lente.x,lente.y)) < 0.5,by=.I]
- #  smaller <- te_data_mix[cover>0.98 & pident>98 & small == T]
- #  smaller <- te_data_mix[cover>0.98 & pident>98
- #   smaller_list <- unique(c(smaller[orf1.y>=orf1.x]$qseqid,smaller[orf1.x>orf1.y]$sseqid))
- #   tes <- tes[!(name %in% smaller_list)]
- #   te_data_mix <- te_data_mix[!(sseqid %in% smaller_list) & !(qseqid %in% smaller_list)]
- #   lx(paste("Removed fragments:", length(smaller_list)))
-   
-  # te_data_mix <- te_data_mix[!grepl("Unknown", sseqid)]
-  # te_data_mix <- te_data_mix[lsgap<10 | rsgap<10]
-  # te_data_mix <- te_data_mix[lqgap<10 | rqgap<10]
-  # te_data_mix <- te_data_mix[]
-   ## Generate list of LINEs that are subsequence of a better one
-   te_data_mix_line <- te_data_mix[(grepl("LINE",qseqid) | grepl("LINE",sseqid)) & pident> 90 & cover > 0.98]
-   te_data_mix_line[,large:=qseqid]
-   te_data_mix_line[lente.y>lente.x,large:=sseqid]
-  
-  # te_data_mix_line <- te_data_mix_line[cover >0.9]
-   small_line <- c()
-   for (l in tes[name %in% good_line][order(-lente)]$name) {
-     matches <- unique(c(te_data_mix_line[large==l]$qseqid,te_data_mix_line[large==l]$sseqid))
-     matches <- matches[matches!=l]
-     small_line <- c(small_line,matches)
-     te_data_mix_line <- te_data_mix_line[!(qseqid %in% matches | sseqid %in% matches)]
-   }
-   
-   ### Find TIR elements that can be reclassified
-   te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) & lsgap < 8 & rsgap < 8 & lqgap < 8 & rqgap <8 ]
-   # tir_reco1 <- te_data_mix_tir[grepl("Unknown",qseqid)]
-   # tir_reco2 <- te_data_mix_tir[grepl("Unknown",sseqid)]
-   tir_reco1 <- te_data_mix_tir[!grepl("DNA",qseqid) & grepl("DNA",sseqid)]
-   tir_reco2 <- te_data_mix_tir[!grepl("DNA",sseqid) & grepl("DNA",qseqid)]
-   tir_reco <- data.table(name=c(tir_reco1$qseqid,tir_reco2$sseqid), sf=gsub(".*#","",c(tir_reco1$sseqid,tir_reco2$qseqid)))
-   tir_reco <- tir_reco[!duplicated(tir_reco)]
-   lx(paste("Unknown elements reclassified as DNA:", nrow(tir_reco)))
-   tir_reco[,new := paste0(gsub("#.*","",name),"#",sf,collapse=""), by=.I]
-   tir_merge <- merge(tes[,1],tir_reco,all.x=T)
-   tir_merge[!is.na(new),name:=new]
-   tes$name <- tir_merge$name
-   
-   ### Find LTR elements that can be reclassified
-   te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) & ((lsgap < 8  & rsgap < 8) | (lqgap < 8 & rqgap <8)) ]
-   # ltr_reco1 <- te_data_mix_ltr[grepl("Unknown",qseqid)]
-   # ltr_reco2 <- te_data_mix_ltr[grepl("Unknown",sseqid)]
-   ltr_reco1 <- te_data_mix_tir[!grepl("LTR",qseqid) & grepl("LTR",sseqid)]
-   ltr_reco2 <- te_data_mix_tir[!grepl("LTR",sseqid) & grepl("LTR",qseqid)]
-   ltr_reco <- data.table(name=c(ltr_reco1$qseqid,ltr_reco2$sseqid), sf=gsub(".*#","",c(ltr_reco1$sseqid,ltr_reco2$qseqid)))
-   ltr_reco <- ltr_reco[!duplicated(ltr_reco)]
-   lx(paste("Unknown elements reclassified as LTR:", nrow(ltr_reco)))
-   ltr_reco[,new := paste0(gsub("#.*","",name),"#",sf,collapse=""), by=.I]
-   ltr_merge <- merge(tes[,1],ltr_reco,all.x=T)
-   ltr_merge[!is.na(new),name:=new]
-   tes$name <- ltr_merge$name
-   
-  ### Putting all together
-   # Remove the dups detected
-   tes <- tes[!(name %in% dups_list)]
-   lx(paste("Removed dups:", length(dups_list)))
-   tes[,pass:=F]
-   tes[,sf:=gsub(".*#","",name), by=.I]
-   tes[name %in% good_line[!(good_line %in% small_line)], pass:=T]
-   tes[grepl("#DIRS",name) & orf1 > 2000 & lente < 10000, pass:=T]
-   tes[grepl("Crypton",name), pass:=T]
-   tes[grepl("#PLE",name), pass:=T]
-   tes[grepl("#SINE",name) & lente < 500, pass:=T]
-   tes[name %in% good_ltr, pass:=T]
-   tes[name %in% ltr_reco$new, pass:=T]
-   tes[name %in% good_tir, pass:=T]
-   tes[name %in% tir_reco$new, pass:=T]
-   tes[grepl("#RC",name) & orf1> 2000, pass:=T]
-   tes[cluster>5 , pass:=T]
-   tes[name %in% small_line, pass:=F]
-   # This should go at the end of the filters
-   tes[is.na(pa),pa:=NA]
-  # tes[,TR1:=maxRep>length & maxRep>1000]
-   tes[,TR2:=maxRep>lente/2.5]
-  # tes[is.na(TR1), TR1:=F]
-   tes[is.na(TR2), TR2:=F]
-  # tes[TR1!=T & TR2!=T, pass:=T]
-   tes[TR2 == T & type == "LTR" & maxRep > 100, pass == F]
-   tes[type == "TIR" & lgap < 3 & rgap< 3, pass:=T]
-   # Reclassification by TSDs
-   tes[grepl("#Unknown",name) & type == "TIR" & tsd_l == 8 & tsd_c >0.3 & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
-   tes[grepl("#Unknown",name) & type == "TIR" & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
- #  tes[grepl("#Unknown",name) & tsd_l == 4 & tsd_c >0.3 & type != "TIR", `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
- #  tes[grepl("#Unknown",name) & tsd_l == 5 & tsd_c >0.3 & type != "TIR", `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
- #  tes[grepl("#Unknown",name) & tsd_l == 6 & tsd_c >0.3 & type != "TIR", `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
-  tes[grepl("#Unknown",name) & tsd_l > 3 & tsd_l < 7 & tsd_c >0.3 & type == "LTR" & length > 150 & lgap < 8 & rgap < 8 & TR2 == F, `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
-   # SINE reclassification by pA and size
-  tes[grepl("#Unknown",name) & lente < 500 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*","",name),"#SINE",collapse=""),pass=T), by=.I]
-   # Recover CACTA with short tirs
-  tes[,st:=short_tir(substr(seq,1,10), rc(substr(seq,nchar(seq)-9,nchar(seq)))), .I]
- 
-  tes[grepl("#DNA", name) & st==T & type == "TIR" & pass == F, length:=7]
-  tes[grepl("#DNA", name) & st==T & type == "TIR" & pass == F, pass:=T]
-  tes[grepl("#DNA", name) & st==T & type != "TIR", pass:=T]
-  tes[grepl("#DNA", name) & st==T & type != "TIR", length:=7]
-  tes[grepl("#DNA", name) & st==T & type != "TIR", type:="TIR"]
-
-
-  lx(paste("TRs discards:", nrow(tes[pass==F])))
+    tes <- merge(tes[,name:=gsub(">","",name)], 
+                 te_data[,c("qseqid","length","lgap","rgap", "type")], 
+                 by.x = "name", by.y = "qseqid", all.x=T)
+    tes[is.na(type), rgap :=0]
+    tes[is.na(type), lgap :=0]
+    tes[is.na(type), length :=0]
+    
+    tes <- merge(tes,te_data_rep, by.x = "name", by.y = "qseqid", all.x=T)
+    tes_count <- nrow(tes)
+    
+    tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq,paste0(strrep("A",opt$pas),"|",strrep("T",opt$pas))),function(x) {min(unlist(x))-1}))
+    tes$eas <- nchar(tes$seq)-unlist(lapply(stri_locate_all_regex(tes$seq,paste0(strrep("A",opt$pas),"|",strrep("T",opt$pas))),function(x) {max(unlist(x))}))
+    tes[,pa:=min(pas,eas), by=.I]
+    tes[substr(seq,1,5)=="AAAAA" | substr(seq,1,5)=="TTTTT" | substr(seq,lente-4,lente)=="AAAAA" | substr(seq,lente-4,lente)=="TTTTT" ,pa:=0, by = .I]
+    
+    good_line <- tes[grepl("LINE",name) & orf1 > 1600 & (pa < 10 | is.na(type) | (lgap >10 & rgap > 10)) ]$name
+    
+    # Find elements which share TIR or LTR to good ones.
+    te_data_mix <- merge(te_data_mix,
+                         tes[,c("name","lente", "orf1", "orf2", "orf3")]
+                         [,name:=gsub(">","",name)], by.x = "qseqid",
+                         by.y="name")
+    te_data_mix <- merge(te_data_mix,
+                         tes[,c("name","lente", "orf1", "orf2", "orf3")]
+                         [,name:=gsub(">","",name)], by.x = "sseqid",
+                         by.y="name")
+    te_data_mix[,lqgap:=.(min(qstart,qend)-1), by=.I]
+    te_data_mix[,rqgap:=.(lente.x-max(qstart,qend)), by=.I]
+    te_data_mix[,lsgap:=.(min(sstart,send)-1), by=.I]
+    te_data_mix[,rsgap:=.(lente.y-max(sstart,send)), by=.I]
+    ## Remove dups
+    te_data_mix[,cover:=length/min(lente.x,lente.y), by=.I]
+    te_data_dups <- te_data_mix[cover>0.98 & pident>99 & abs((lente.y-lente.x) / max(lente.y,lente.x))<0.01 ]
+    te_data_dups[,uname:=paste0(c(qseqid,sseqid)[order(c(qseqid,sseqid))], collapse = ""), .I]
+    te_data_dups <- te_data_dups[order(orf1.x-orf1.y)]
+    dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
+    te_data_mix <- te_data_mix[!(qseqid %in% dups_list)]
+    te_data_mix <- te_data_mix[!(sseqid %in% dups_list)]
+    
+    ## Generate list of LINEs that are subsequence of a better one
+    te_data_mix_line <- te_data_mix[(grepl("LINE",qseqid) | grepl("LINE",sseqid)) & pident> 90 & cover > 0.98]
+    te_data_mix_line[,large:=qseqid]
+    te_data_mix_line[lente.y>lente.x,large:=sseqid]
+    
+    small_line <- c()
+    for (l in tes[name %in% good_line][order(-lente)]$name) {
+      matches <- unique(c(te_data_mix_line[large==l]$qseqid,te_data_mix_line[large==l]$sseqid))
+      matches <- matches[matches!=l]
+      small_line <- c(small_line,matches)
+      te_data_mix_line <- te_data_mix_line[!(qseqid %in% matches | sseqid %in% matches)]
+    }
+    
+    ### Find TIR elements that can be reclassified
+    te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) & lsgap < 8 & rsgap < 8 & lqgap < 8 & rqgap <8 ]
+    tir_reco1 <- te_data_mix_tir[!grepl("DNA",qseqid) & grepl("DNA",sseqid)]
+    tir_reco2 <- te_data_mix_tir[!grepl("DNA",sseqid) & grepl("DNA",qseqid)]
+    tir_reco <- data.table(name=c(tir_reco1$qseqid,tir_reco2$sseqid), sf=gsub(".*#","",c(tir_reco1$sseqid,tir_reco2$qseqid)))
+    tir_reco <- tir_reco[!duplicated(tir_reco)]
+    lx(paste("Unknown elements reclassified as DNA:", nrow(tir_reco)))
+    tir_reco[,new := paste0(gsub("#.*","",name),"#",sf,collapse=""), by=.I]
+    tir_merge <- merge(tes[,1],tir_reco,all.x=T)
+    tir_merge[!is.na(new),name:=new]
+    tes$name <- tir_merge$name
+    
+    ### Find LTR elements that can be reclassified
+    te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) & ((lsgap < 8  & rsgap < 8) | (lqgap < 8 & rqgap <8)) ]
+    ltr_reco1 <- te_data_mix_tir[!grepl("LTR",qseqid) & grepl("LTR",sseqid)]
+    ltr_reco2 <- te_data_mix_tir[!grepl("LTR",sseqid) & grepl("LTR",qseqid)]
+    ltr_reco <- data.table(name=c(ltr_reco1$qseqid,ltr_reco2$sseqid), sf=gsub(".*#","",c(ltr_reco1$sseqid,ltr_reco2$qseqid)))
+    ltr_reco <- ltr_reco[!duplicated(ltr_reco)]
+    lx(paste("Unknown elements reclassified as LTR:", nrow(ltr_reco)))
+    ltr_reco[,new := paste0(gsub("#.*","",name),"#",sf,collapse=""), by=.I]
+    ltr_merge <- merge(tes[,1],ltr_reco,all.x=T)
+    ltr_merge[!is.na(new),name:=new]
+    tes$name <- ltr_merge$name
+    
+    ### Putting all together
+    # Remove the dups detected
+    tes <- tes[!(name %in% dups_list)]
+    lx(paste("Removed dups:", length(dups_list)))
+    tes[,pass:=F]
+    tes[,sf:=gsub(".*#","",name), by=.I]
+    tes[name %in% good_line[!(good_line %in% small_line)], pass:=T]
+    tes[grepl("#DIRS",name) & orf1 > 2000 & lente < 10000, pass:=T]
+    tes[grepl("Crypton",name), pass:=T]
+    tes[grepl("#PLE",name), pass:=T]
+    tes[grepl("#SINE",name) & lente < 500, pass:=T]
+    tes[name %in% good_ltr, pass:=T]
+    tes[name %in% ltr_reco$new, pass:=T]
+    tes[name %in% good_tir, pass:=T]
+    tes[name %in% tir_reco$new, pass:=T]
+    tes[grepl("#RC",name) & orf1> 2000, pass:=T]
+    tes[cluster>5 , pass:=T]
+    tes[name %in% small_line, pass:=F]
+    # This should go at the end of the filters
+    tes[is.na(pa),pa:=100]
+    tes[,TR2:=maxRep>lente/2.5]
+    tes[is.na(TR2), TR2:=F]
+    tes[TR2 == T & type == "LTR" & maxRep > 100, pass == F]
+    tes[type == "TIR" & lgap < 3 & rgap< 3, pass:=T]
+    # Reclassification by TSDs
+    tes[grepl("#Unknown",name) & type == "TIR" & tsd_l == 8 & tsd_c >0.3 & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
+    tes[grepl("#Unknown",name) & type == "TIR" & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
+    tes[grepl("#Unknown",name) & tsd_l > 3 & tsd_l < 7 & tsd_c >0.3 & type == "LTR" & length > 150 & lgap < 8 & rgap < 8 & TR2 == F, `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
+    # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
+    tes[grepl("#Unknown",name) & lente < 500 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*","",name),"#SINE",collapse=""),pass=T), by=.I]
+    # Recover DNA elements with short tirs
+    tes[,st:=short_tir(substr(seq,1,10), rc(substr(seq,nchar(seq)-9,nchar(seq)))), .I]
+    
+    tes[grepl("#DNA", name) & st==T & type == "TIR" & pass == F, length:=7]
+    tes[grepl("#DNA", name) & st==T & type == "TIR" & pass == F, pass:=T]
+    tes[grepl("#DNA", name) & st==T & type != "TIR", pass:=T]
+    tes[grepl("#DNA", name) & st==T & type != "TIR", length:=7]
+    tes[grepl("#DNA", name) & st==T & type != "TIR", type:="TIR"]
+    
+    
+    lx(paste("TRs discards:", nrow(tes[pass==F])))
   }
   setwd("..")
   unlink(temp, recursive = TRUE)
@@ -1062,19 +997,17 @@ stats_tes <- function() {
   tes[,name:=paste0(">",name, collapse = ""), .I]
   wfasta(tes[, c("name", "seq")], paste0(opt$lib_name, "-pantera-final.fa"))
   wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-pass.fa"))
- # wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
+  # wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
   stats_data <- tes[,c("name","lente","pass", "cluster", "tsd_l","tsd_c","tsd_m","type",
                        "length","lgap","rgap","pa","orf1","orf2","orf3","maxRep")]
   ### Last fixes
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0]
-  stats_data[is.na(pa),  pa :=100]
-  stats_data[,  pa :=pa<opt$pA_bases]
-
+  stats_data$pa <- stats_data$pa<opt$pas
   
   colnames(stats_data) <- c("name","TE_len","pass", "cluster_size", "TSD_length","TSD_confidence","TSD_motif", 
                             "struct_type","struct_len","left_gap",
                             "right_gap","polyA","orf1","orf2","orf3","maxTR")
-
+  
   fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats"), 
          quote =  F, row.names = F, sep ="\t")
 }
@@ -1088,7 +1021,7 @@ cleanup <- function() {
   unlink("orfs.tbl")
   unlink("pantera_lib_0.fa")
   unlink("segments_candidates.fa")
- # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
+  # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
   unlink("temp.orfs")
   unlink("*consensi*")
   setwd(current)
@@ -1109,38 +1042,38 @@ current <- getwd()
 
 invisible(tryCatch({get_libs()}, error = function(err) {
   end_pantera(paste("Installing libs error ->",geterrmessage()))
-  }))
+}))
 invisible(tryCatch({opt <- read_pars()}, error = function(err) {
   end_pantera(paste("Reading parameters error ->",geterrmessage()))
-  }))
+}))
 invisible(tryCatch({init_pantera()}, error = function(err) {
   end_pantera(paste("Initialization error ->",geterrmessage()))
-  }))
+}))
 
 segments_unique <- data.table(name = as.character(),
                               seq = as.character())
 
 invisible(tryCatch({segments_unique <- read_poly()}, error = function(err) {
   end_pantera(paste("Error reading 1aln ->",geterrmessage()))
-  }))
+}))
 
 setwd(opt$output_folder)
 
 invisible(tryCatch({find_repeats()}, error = function(err) {
   end_pantera(paste("Error round 1 ->",geterrmessage()))
-  }))
+}))
 invisible(tryCatch({cluster_results()}, error = function(err) {
   end_pantera(paste("Error round 2 ->",geterrmessage()))
-  }))
+}))
 invisible(tryCatch({final <- classify_tes()}, error = function(err) {
   end_pantera(paste("Error Classification ->",geterrmessage()))
-  }))
+}))
 invisible(tryCatch({stats_tes()}, error = function(err) {
   end_pantera(paste("Error Stats ->",geterrmessage()))
-  }))
+}))
 if (opt$debug == FALSE) {
-invisible(tryCatch({cleanup()}, error = function(err) {
-  end_pantera(paste("Error Cleanning up ->",geterrmessage()))
+  invisible(tryCatch({cleanup()}, error = function(err) {
+    end_pantera(paste("Error Cleanning up ->",geterrmessage()))
   }))
 }
 
