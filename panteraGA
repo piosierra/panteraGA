@@ -19,9 +19,6 @@ scriptPath <- normalizePath(dirname(sub("^--file=", "",
                                             cmdArgs[grep("^--file=",
                                            cmdArgs)])))[1]
 
- 
-
-
 if (!file.exists(file.path(scriptPath, "Rlibs"))) {
   dir.create(file.path(scriptPath, "Rlibs"))
 }
@@ -363,6 +360,7 @@ end_pantera <- function(message) {
   quit(save = "no")
 }
 
+### Detection of small, degraded TIR
 short_tir <- function(a,b) {
   lcs <- LCS(strsplit(a,"")[[1]], strsplit(b,"")[[1]])
   return(nchar(paste0(lcs$LCS,collapse = ""))>7)
@@ -379,6 +377,38 @@ reformatDNA <- function(dna) {
   return(temp)
 }
 
+# Calls and processes cdhit
+cdhit1 <- function(sequences, threshold) {
+  fname <- paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse="")
+  wfasta(sequences[,1:2],fname)
+  system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
+  hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
+  hitcl[,tic:=substr(V2,1,1)]
+  hitcl[,clus:=rleid(tic)]
+  hitcl <- hitcl[tic==">",c("V2","clus")]
+  colnames(hitcl) <- c("name","clus")
+  unlink(fname)
+  unlink(paste0("cl",fname,".clstr", collapse = ""))
+  unlink(paste0("cl",fname, collapse = ""))
+  hitcl[,name:=gsub("\\.\\.\\.","",name)]
+} 
+
+# Calls cdhit with alternative options
+cdhit2 <- function(sequences, threshold) {
+  fname <- paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse="")
+  wfasta(sequences[,1:2],fname)
+  system(paste0("cd-hit-est -G 0 -g 0 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
+  hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
+  hitcl[,tic:=substr(V2,1,1)]
+  hitcl[,clus:=rleid(tic)]
+  hitcl <- hitcl[tic==">",c("V2","clus")]
+  colnames(hitcl) <- c("name","clus")
+  unlink(fname)
+  unlink(paste0("cl",fname,".clstr", collapse = ""))
+  unlink(paste0("cl",fname, collapse = ""))
+  hitcl[,name:=gsub("\\.\\.\\.","",name)]
+} 
+
 
 ###
 ### Main functions 
@@ -391,11 +421,13 @@ init_pantera <- function() {
              showWarnings = FALSE,
              recursive = T)
   sink(paste0(opt$output_folder, "/pantera.log"), split = opt$verbose) 
-lx(paste("pantera", pantera_version, "\n"))
+lx(paste("panteraGA", pantera_version, "\n"))
 
 ## Confirm dependencies are available
 if (!(nchar(Sys.which("mafft")) > 0)) {
   end_pantera("mafft not found")
+} else {
+  mafft_exec <- Sys.which("mafft")
 }
 if (!(nchar(Sys.which("getorf")) > 0)) {
   end_pantera("getorf not found")
@@ -417,7 +449,7 @@ if (!file.exists(file.path(this.dir(), "model/typesnames"))) {
   end_pantera("Model not found.")
 }
 
-lx(paste("pantera path:", this.path()))
+lx(paste("panteraGA path:", this.path()))
 lx(paste("1aln file:", opt$sv_file))
 lx(paste("Output folder:", opt$output_folder))
 lx(paste("Threads to use:", opt$threads))
@@ -446,36 +478,6 @@ read_poly <- function() {
   segments_unique[,len:=nchar(seq)]
 return(segments_unique)  
 }  
-
-cdhit1 <- function(sequences, threshold) {
-  fname <- paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse="")
-  wfasta(sequences[,1:2],fname)
-  system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
-  hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
-  hitcl[,tic:=substr(V2,1,1)]
-  hitcl[,clus:=rleid(tic)]
-  hitcl <- hitcl[tic==">",c("V2","clus")]
-  colnames(hitcl) <- c("name","clus")
-  unlink(fname)
-  unlink(paste0("cl",fname,".clstr", collapse = ""))
-  unlink(paste0("cl",fname, collapse = ""))
-  hitcl[,name:=gsub("\\.\\.\\.","",name)]
-} 
-
-cdhit2 <- function(sequences, threshold) {
-  fname <- paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse="")
-  wfasta(sequences[,1:2],fname)
-  system(paste0("cd-hit-est -G 0 -g 0 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
-  hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
-  hitcl[,tic:=substr(V2,1,1)]
-  hitcl[,clus:=rleid(tic)]
-  hitcl <- hitcl[tic==">",c("V2","clus")]
-  colnames(hitcl) <- c("name","clus")
-  unlink(fname)
-  unlink(paste0("cl",fname,".clstr", collapse = ""))
-  unlink(paste0("cl",fname, collapse = ""))
-  hitcl[,name:=gsub("\\.\\.\\.","",name)]
-} 
 
 # First pass, finds repeats but does not try to generate any consensus.  
 find_repeats <- function() {
@@ -635,8 +637,6 @@ cluster_results <- function() {
                                                 ambiguityMap = "-", 
                                                 threshold = cons_threshold))
                
-                ### Exploring how to find the TSDs. The cons gives as already the positions. Maybe get pos +-1,checkt that one, and then extend to both sides?
-                
                 cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
                 dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
                 saturation <- unlist(lapply(dtMatrix[1:4],sum))/length(seqs)
@@ -1068,7 +1068,7 @@ stats_tes <- function() {
   ### Last fixes
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0]
   stats_data[is.na(pa),  pa :=100]
-  stats_data[pa < 10,  pa :=pa>opt$pa_bases]
+  stats_data[,  pa :=pa<opt$pA_bases]
 
   
   colnames(stats_data) <- c("name","TE_len","pass", "cluster_size", "TSD_length","TSD_confidence","TSD_motif", 
@@ -1102,19 +1102,19 @@ cleanup <- function() {
 ### MAIN 
 ###
 
-invisible(tryCatch({get_libs()}, error = function(err) {
-  end_pantera(paste("Installing libs error ->",geterrmessage()))
-  }))
-invisible(tryCatch({opt <- read_pars()}, error = function(err) {
-  end_pantera(paste("Reading parameters error ->",geterrmessage()))
-  }))
-
 # Internal globals 
 zones_interval <- 60
 zones_interval_overlap <- 30
 current <- getwd()
 segments_unique <- data.table(name = as.character(),
                               seq = as.character())
+
+invisible(tryCatch({get_libs()}, error = function(err) {
+  end_pantera(paste("Installing libs error ->",geterrmessage()))
+  }))
+invisible(tryCatch({opt <- read_pars()}, error = function(err) {
+  end_pantera(paste("Reading parameters error ->",geterrmessage()))
+  }))
 
 invisible(tryCatch({init_pantera()}, error = function(err) {
   end_pantera(paste("Initialization error ->",geterrmessage()))
