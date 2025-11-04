@@ -1067,8 +1067,9 @@ stats_tes <- function() {
                        "length","lgap","rgap","pa","orf1","orf2","orf3","maxRep")]
   ### Last fixes
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0]
-  stats_data[pa < 10,  pa :="Yes"]
-  stats_data[pa != "Yes",  pa :=""]
+  stats_data[is.na(pa),  pa :=100]
+  stats_data[pa < 10,  pa :=pa>opt$pa_bases]
+
   
   colnames(stats_data) <- c("name","TE_len","pass", "cluster_size", "TSD_length","TSD_confidence","TSD_motif", 
                             "struct_type","struct_len","left_gap",
