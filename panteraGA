@@ -2,9 +2,10 @@
 
 # First version using FastGA alignments.
 # Improved stats and recovery of TEs
+# Dev version to include option to work with list of genomes.
 
 
-pantera_version <- "1.0.0"
+pantera_version <- "1.1.0"
 options(warn = 0)
 
 
@@ -110,7 +111,7 @@ get_libs <- function() {
 read_pars <- function() {
   
   spec <- matrix(
-    c("sv_file",        "1", 1, "character",   # 1aln input file [required]
+    c("genomes",        "g", 1, "character", # list of genomes
       "output_folder",  "o", 1, "character", # Output foder [pantera_output]
       "lib_name",       "b", 1, "character", # Name to append to the output sequences [pantera]
       "threads",        "T", 1, "integer",   # Number of threads [all]
@@ -141,8 +142,8 @@ read_pars <- function() {
   if (is.null(opt$debug)) {
     opt$debug <- FALSE
   }
-  if (is.null(opt$sv_file)) {
-    stop("[--svfile|-1] missing")
+  if (is.null(opt$genomes)) {
+    stop("[--genomes|-g] missing")
   }
   
   if (is.null(opt$output_folder)) {
@@ -150,7 +151,7 @@ read_pars <- function() {
   }
   
   if (is.null(opt$lib_name)) {
-    opt$lib_name <- gsub(".1aln","",opt$sv_file)
+    stop("[--lib-name|-b] missing")
   }
   
   if (is.null(opt$threads)) {
@@ -285,18 +286,13 @@ kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
 }
 
 # Reads the two ONEcode files extracted from a 1aln file with svfind
-parseONEview <- function(f) {
-  lx(paste("Procesing file =", f))
-  check <- file.size(f)
-  if (check == 0 | is.na(check)) {
-    end_pantera(".1aln file missing")
-  } else {
+parseONEview <- function(n) {
+  lx(paste("Procesing ", n, " alignments"))
+  for (i in 1:n) {
+    f <- paste0("pantera",i,".1aln")
     system(paste0("svfind -x 12 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa -b ",opt$output_folder,"/",opt$lib_name,"hapb ", f, " > /dev/null 2>&1"))
-    ova <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa"), fill = T)
-    ovb <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapb"), fill = T)
-    ova[,f:="a"]
-    ovb[,f:="b"]
-    ov <- rbind(ova,ovb)
+    ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa"), fill = T)
+    ov[,f:="a"]
     sequences <- ov[V1=="S",2:3][,V2:=as.numeric(V2)]
     file <- ov[V1=="S",f]
     overhangs <- ov[V1=="Q",2:3][,V2:=as.numeric(V2)]
@@ -334,9 +330,15 @@ parseONEview <- function(f) {
       ovall <- ovall[Ns <= (len * opt$Ns)]
       lx(paste("Number of valid Ns segments =", nrow(ovall)))
     }
-    ovall[,name:=paste0(">",.I)]
+   
+    if (i==1) { 
+      ovret <- copy(ovall)
+    } else {
+      ovret <- rbind(ovret,ovall)
+      }
   }
-  return(ovall[,c("name","seq")])
+  ovret[,name:=paste0(">",.I)]
+  return(ovret[,c("name","seq")])
 }
 
 # Reverse complement of a DNA sequence
@@ -468,9 +470,9 @@ init_pantera <- function() {
 
 
 # Obtains and stores the polymorphic segments
-read_poly <- function() {
+read_poly <- function(ngen) {
   if (!file.exists(paste0("all_segments.fa"))) {
-    segments_unique <- parseONEview(opt$sv_file)
+    segments_unique <- parseONEview(ngen)
     segments_unique[,seq:=toupper(seq)]
     wfasta(segments_unique[, c("name", "seq")],
            paste0(opt$output_folder, "/all_segments.fa"))
@@ -478,6 +480,30 @@ read_poly <- function() {
   segments_unique[,len:=nchar(seq)]
   return(segments_unique)  
 }  
+
+# Make alignments with FastGA
+make_alignments <- function(glist) {
+    # Check if file exists
+    if (!file.exists(glist)) {
+      end_pantera("File not found: ", glist)
+    }
+    genomes <- readLines(glist)
+    genomes <- trimws(genomes[nzchar(trimws(genomes))])
+    if (length(genomes)<2) {
+      end_pantera("At least two genomes needed in ", glist)
+    }
+   for (i in 1:(length(genomes)-1)) {
+     lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " - ", gsub(".*/","",genomes[i+1]) ))
+     if (!file.exists(paste0("pantera",i,".1aln"))) {
+     system(paste0("FastGA -1:pantera",i," ", genomes[i]," ", genomes[i+1]))
+     }
+   }
+    lx(paste0("Aligning ", gsub(".*/","",genomes[length(genomes)]), " - ", gsub(".*/","",genomes[1]) ))
+    if (!file.exists(paste0("pantera",length(genomes),".1aln"))) {
+    system(paste0("FastGA -1:pantera",length(genomes)," ", genomes[length(genomes)]," ", genomes[1]))
+    }
+    return(length(genomes))
+  }
 
 # First pass, finds repeats but does not try to generate any consensus.  
 find_repeats <- function() {
@@ -744,7 +770,7 @@ classify_tes <- function() {
                  sep = "\n")
     features <- features$V1
     xgb.fit <-
-      xgb.load(file.path(this.dir(), "model/xgbmodel.big"))
+      xgb.load(file.path(this.dir(), "model/xgbmodel.ubj"))
     lx("Processing")
     orfs[, V1 := gsub("_[0-9]*$", "", V1)]
     orfs[, prot := gsub(".*#", "", V2)]
@@ -773,7 +799,7 @@ classify_tes <- function() {
     setcolorder(orfs_table, features)
     
     lx("Get predictions")
-    xgb.pred2 = predict(xgb.fit, as.matrix(orfs_table), reshape = T)
+    xgb.pred2 = predict(xgb.fit, as.matrix(orfs_table))
     xgb.pred2 = as.data.frame(xgb.pred2)
     colnames(xgb.pred2) = types
     xgb.pred2$prediction = apply(xgb.pred2, 1, function(x)
@@ -1053,8 +1079,12 @@ invisible(tryCatch({init_pantera()}, error = function(err) {
 segments_unique <- data.table(name = as.character(),
                               seq = as.character())
 
-invisible(tryCatch({segments_unique <- read_poly()}, error = function(err) {
-  end_pantera(paste("Error reading 1aln ->",geterrmessage()))
+invisible(tryCatch({ngen <- make_alignments(opt$genomes)}, error = function(err) {
+  end_pantera(paste("Alignments error ->",geterrmessage()))
+}))
+
+invisible(tryCatch({segments_unique <- read_poly(ngen)}, error = function(err) {
+  end_pantera(paste("Error reading polymorphisms ->",geterrmessage()))
 }))
 
 setwd(opt$output_folder)
