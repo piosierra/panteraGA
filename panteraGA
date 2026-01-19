@@ -125,7 +125,8 @@ read_pars <- function() {
       "cl_size",        "u", 1, "integer",   # Max number of sequences to cluster [200] 
       "flanking",       "f", 1, "integer",   # Min length of flanking sequences [automatic]
       "verbose",        "v", 0, "logical",   # Show log messages
-      "debug",          "d", 0, "logical",   # Keep intermediate files.
+      "keep",           "k", 0, "logical",   # Keep alignment files
+      "debug",          "d", 0, "logical",   # Keep intermediate files
       "help",           "h", 0, "logical"),  # Show this help 
     byrow = TRUE, ncol = 4)
   
@@ -142,6 +143,10 @@ read_pars <- function() {
   if (is.null(opt$debug)) {
     opt$debug <- FALSE
   }
+  if (is.null(opt$keep)) {
+    opt$keep <- FALSE
+  }
+  
   if (is.null(opt$genomes)) {
     stop("[--genomes|-g] missing")
   }
@@ -289,7 +294,7 @@ kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
 parseONEview <- function(n) {
   lx(paste("Procesing ", n, " alignments"))
   for (i in 1:n) {
-    f <- paste0("pantera",i,".1aln")
+    f <- paste0(opt$output_folder,"/pantera",i,".1aln")
     system(paste0("svfind -x 12 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa -b ",opt$output_folder,"/",opt$lib_name,"hapb ", f, " > /dev/null 2>&1"))
     ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa"), fill = T)
     ov[,f:="a"]
@@ -452,7 +457,7 @@ init_pantera <- function() {
   }
   
   lx(paste("panteraGA path:", this.path()))
-  lx(paste("1aln file:", opt$sv_file))
+  lx(paste("Genomes list file:", opt$genomes))
   lx(paste("Output folder:", opt$output_folder))
   lx(paste("Threads to use:", opt$threads))
   lx(paste("Cores detected:", detectCores()))
@@ -494,13 +499,13 @@ make_alignments <- function(glist) {
     }
    for (i in 1:(length(genomes)-1)) {
      lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " - ", gsub(".*/","",genomes[i+1]) ))
-     if (!file.exists(paste0("pantera",i,".1aln"))) {
-     system(paste0("FastGA -1:pantera",i," ", genomes[i]," ", genomes[i+1]))
+     if (!file.exists(paste0(opt$output_folder,"/pantera",i,".1aln"))) {
+     system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," ", genomes[i]," ", genomes[i+1]))
      }
    }
     lx(paste0("Aligning ", gsub(".*/","",genomes[length(genomes)]), " - ", gsub(".*/","",genomes[1]) ))
-    if (!file.exists(paste0("pantera",length(genomes),".1aln"))) {
-    system(paste0("FastGA -1:pantera",length(genomes)," ", genomes[length(genomes)]," ", genomes[1]))
+    if (!file.exists(paste0(opt$output_folder,"/pantera",length(genomes),".1aln"))) {
+    system(paste0("FastGA -1:",opt$output_folder,"/pantera",length(genomes)," ", genomes[length(genomes)]," ", genomes[1]))
     }
     return(length(genomes))
   }
@@ -1050,6 +1055,9 @@ cleanup <- function() {
   # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
   unlink("temp.orfs")
   unlink("*consensi*")
+  if (opt$keep == FALSE) {
+    unlink("*.1aln")
+    }
   setwd(current)
   lx(paste0(   "\u001b[32;2m",
                "\u263A",
