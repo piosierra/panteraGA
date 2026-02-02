@@ -500,7 +500,7 @@ make_alignments <- function(glist) {
    for (i in 1:(length(genomes)-1)) {
      lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " - ", gsub(".*/","",genomes[i+1]) ))
      if (!file.exists(paste0(opt$output_folder,"/pantera",i,".1aln"))) {
-     system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," ", genomes[i]," ", genomes[i+1]))
+         system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," ", genomes[i]," ", genomes[i+1]))
      }
    }
     lx(paste0("Aligning ", gsub(".*/","",genomes[length(genomes)]), " - ", gsub(".*/","",genomes[1]) ))
@@ -996,7 +996,10 @@ stats_tes <- function() {
     tes[name %in% good_tir, pass:=T]
     tes[name %in% tir_reco$new, pass:=T]
     tes[grepl("#RC",name) & orf1> 2000, pass:=T]
-    tes[cluster>5 , pass:=T]
+    ucut <- kneedle(tes[,.N,cluster]$cluster,tes[,.N,cluster]$N)
+    lx(paste("Unknown recovery cutpoint:", ucut[1]))
+    tes[cluster>max(5, ucut[1]) , pass:=T]
+    
     tes[name %in% small_line, pass:=F]
     # This should go at the end of the filters
     tes[is.na(pa),pa:=100]
