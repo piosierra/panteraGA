@@ -187,7 +187,7 @@ read_pars <- function() {
   
   if (is.null(opt$Ns)) {
     # Maximum percentage of Ns in segment.
-    opt$Ns <- 0
+    opt$Ns <- 0.001
   }
   
   if (is.null(opt$pas)) {
@@ -296,7 +296,9 @@ parseONEview <- function(n) {
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
     system(paste0("svfind -x 12 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa -b ",opt$output_folder,"/",opt$lib_name,"hapb ", f, " > /dev/null 2>&1"))
+    if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))>0) {
     ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa"), fill = T)
+    if (nrow(ov)>0) {
     ov[,f:="a"]
     sequences <- ov[V1=="S",2:3][,V2:=as.numeric(V2)]
     file <- ov[V1=="S",f]
@@ -326,15 +328,14 @@ parseONEview <- function(n) {
     ovall[is.na(ov) ,ov:=1]
     ovall[ov < -seq_len ,ov:=1]
     ovall <- ovall[ov>0]
-    
     unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
     unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
-    
-    if (opt$Ns > 0) {
-      ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
-      ovall <- ovall[Ns <= (len * opt$Ns)]
-      lx(paste("Number of valid Ns segments =", nrow(ovall)))
+    ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
+    ovall <- ovall[Ns <= (nchar(seq) * opt$Ns)]
+    lx(paste("Number of valid Ns segments =", nrow(ovall)))
+ 
     }
+  }
    
     if (i==1) { 
       ovret <- copy(ovall)
@@ -498,12 +499,12 @@ make_alignments <- function(glist) {
       end_pantera("At least two genomes needed in ", glist)
     }
    for (i in 1:(length(genomes)-1)) {
-     lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " - ", gsub(".*/","",genomes[i+1]) ))
+     lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " <-> ", gsub(".*/","",genomes[i+1]) ))
      if (!file.exists(paste0(opt$output_folder,"/pantera",i,".1aln"))) {
          system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," ", genomes[i]," ", genomes[i+1]))
      }
    }
-    lx(paste0("Aligning ", gsub(".*/","",genomes[length(genomes)]), " - ", gsub(".*/","",genomes[1]) ))
+    lx(paste0("Aligning ", gsub(".*/","",genomes[length(genomes)]), " <-> ", gsub(".*/","",genomes[1]) ))
     if (!file.exists(paste0(opt$output_folder,"/pantera",length(genomes),".1aln"))) {
     system(paste0("FastGA -1:",opt$output_folder,"/pantera",length(genomes)," ", genomes[length(genomes)]," ", genomes[1]))
     }
@@ -597,6 +598,16 @@ find_repeats <- function() {
   setwd("..")
 }
 
+get_highest_letter <- function(mat) {
+  priority <- c("A", "C", "G", "T","-")
+  
+  apply(mat, 2, function(col) {
+    max_val <- max(col)
+    tied <- rownames(mat)[col == max_val]
+    priority[priority %in% tied][1]
+  })
+}
+
 # Second pass. Cluster and generate consensus. 
 cluster_results <- function() {
   
@@ -605,11 +616,11 @@ cluster_results <- function() {
     end <- as.numeric(zone[2]) + zones_interval_overlap
     discards <- 0
     if (start != end) {
-      #   lx(paste("Procesing segments:", start, "-", end))
+     #    lx(paste("Procesing segments:", start, "-", end))
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
-        #      lx(paste("Number of sequences:", nrow(segment_u)))
+      #        lx(paste("Number of sequences:", nrow(segment_u)))
         if (nrow(segment_u) >= opt$min_cl)  {
           segment_sets <- split(segment_u, 
                                 rep(1:(nrow(segment_u) %/% opt$cl_size +1), 
@@ -617,12 +628,13 @@ cluster_results <- function() {
                                     each = ceiling(nrow(segment_u) / 
                                                      (nrow(segment_u) %/%
                                                         opt$cl_size +1))))
-          #        lx(paste("Segment sets", start, "-", end, ":", length(segment_sets)))
+      
           consensi <- data.table(name = as.character(), 
                                  seq = as.character())
           for (ss in 1:length(segment_sets)) {
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
+            #  lx(paste("Segment sets", start, "-", end, ":", nrow(sg)))
               sg_clus <- cdhit1(sg, opt$identity2)
               sg_clus[,n:=.N,clus]
               sg_clus <- sg_clus[n>=opt$min_cl]
@@ -643,16 +655,19 @@ cluster_results <- function() {
                                       exec = "mafft"
                     )
                     alim <- reformatDNA(ali)
-                    cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
-                                                                ambiguityMap = "-", 
-                                                                threshold = cons_threshold))
-                    
+                    # cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
+                    #                                             ambiguityMap = "-",
+                    #                                             threshold = cons_threshold))
+      
                     ### TSD data
                     cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
                     dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
                     saturation <- unlist(lapply(dtMatrix[1:4],sum))/length(seqs)
                     conserv <- unlist(lapply(dtMatrix[1:4],max))/length(seqs)
                     consstring <- paste0(as.numeric(conserv>=cons_threshold+.4),collapse = "")
+                    
+                    cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),]),collapse="")
+            
                     cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[1]
                     cons_e <- stri_locate_last_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[2]
                     edges <- data.table(l=stri_reverse(gsub("-","",substr(alim,1,cons_s-1))), r=gsub("-","",substr(alim,cons_e+1,nchar(alim[1]))))
@@ -660,20 +675,22 @@ cluster_results <- function() {
                     tsd_len <- min(which(tsds2==max(tsds2),tsds2))+1
                     tsds_conf <- round(tsds2[tsd_len-1]/nrow(edges),2)
                     tsds_motif <- Biostrings::consensusString(Biostrings::DNAStringSet(c(substr(edges$r,1,tsd_len),stri_reverse(substr(edges$l,1,tsd_len)))), ambiguityMap=IUPAC_CODE_MAP,
-                                                              threshold=0.25, shift=0L, width=NULL)
+                                                             shift=0L, width=NULL)
                     
                     
                   } else {
                     cons <- toupper(paste0(unlist(as.character(seqs)), 
                                            collapse = ""))
                   }
-                  cons <- gsub("-","N",cons)
                   cons <- substr(cons,cons_s,cons_e)
-                  cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
+                  cons <- gsub("-","",cons)
+                  # cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
                   nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
                                 nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif,"@@")
-                  consensi <- rbindlist(list(consensi, data.table(name = nam, 
+                  if (nchar(cons) >= opt$min_size) {
+                    consensi <- rbindlist(list(consensi, data.table(name = nam, 
                                                                   seq = cons)))
+                  }
                 }
               } 
             }
@@ -689,7 +706,6 @@ cluster_results <- function() {
     return(discards)
   }
   
-  opt$Ns <- 0
   zones_interval <- 300
   zones_interval_overlap <- 0
   cons_threshold <- 0.4
@@ -802,15 +818,14 @@ classify_tes <- function() {
     }
     orfs_table[, features[!(features %in% colnames(orfs_table))] := 0]
     setcolorder(orfs_table, features)
-    
-    lx("Get predictions")
-    xgb.pred2 = predict(xgb.fit, as.matrix(orfs_table))
+    xgb.pred2 = predict(xgb.fit, orfs_table)
     xgb.pred2 = as.data.frame(xgb.pred2)
     colnames(xgb.pred2) = types
     xgb.pred2$prediction = apply(xgb.pred2, 1, function(x)
       colnames(xgb.pred2)[which.max(x)])
     xgb.pred2$prob = apply(xgb.pred2[1:ncol(xgb.pred2) - 1], 1, function(x)
       max(x))
+    
     result <-
       data.table(
         Name = names,
@@ -1022,7 +1037,9 @@ stats_tes <- function() {
     tes[grepl("#DNA", name) & st==T & type != "TIR", length:=7]
     tes[grepl("#DNA", name) & st==T & type != "TIR", type:="TIR"]
     
-    
+    tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
+    tes[Ns > (nchar(seq) * opt$Ns), pass:=F]
+ 
     lx(paste("TRs discards:", nrow(tes[pass==F])))
   }
   setwd("..")
@@ -1033,14 +1050,14 @@ stats_tes <- function() {
   wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-pass.fa"))
   # wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
   stats_data <- tes[,c("name","lente","pass", "cluster", "tsd_l","tsd_c","tsd_m","type",
-                       "length","lgap","rgap","pa","orf1","orf2","orf3","maxRep")]
+                       "length","lgap","rgap","pa","orf1","orf2","orf3","maxRep","Ns")]
   ### Last fixes
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0]
   stats_data$pa <- stats_data$pa<opt$pas
   
   colnames(stats_data) <- c("name","TE_len","pass", "cluster_size", "TSD_length","TSD_confidence","TSD_motif", 
                             "struct_type","struct_len","left_gap",
-                            "right_gap","polyA","orf1","orf2","orf3","maxTR")
+                            "right_gap","polyA","orf1","orf2","orf3","maxTR","Ns")
   
   fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats"), 
          quote =  F, row.names = F, sep ="\t")
