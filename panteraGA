@@ -682,12 +682,15 @@ cluster_results <- function() {
                     cons <- toupper(paste0(unlist(as.character(seqs)), 
                                            collapse = ""))
                   }
+                  alll <- nchar(cons)
                   cons <- substr(cons,cons_s,cons_e)
+                  cutl <- nchar(cons)
                   cons <- gsub("-","",cons)
                   # cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
                   nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
                                 nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif,"@@")
-                  if (nchar(cons) >= opt$min_size) {
+                  if ((nchar(cons) >= opt$min_size) &
+                      alll-cutl > 10) {  # Remove clusters that include the edges, they are most likely segdups
                     consensi <- rbindlist(list(consensi, data.table(name = nam, 
                                                                   seq = cons)))
                   }
@@ -1013,7 +1016,7 @@ stats_tes <- function() {
     tes[grepl("#RC",name) & orf1> 2000, pass:=T]
     ucut <- kneedle(tes[,.N,cluster]$cluster,tes[,.N,cluster]$N)
     lx(paste("Unknown recovery cutpoint:", ucut[1]))
-    tes[cluster>max(5, ucut[1]) , pass:=T]
+    tes[grepl("#Unknown",name) & cluster>max(5, ucut[1]) , pass:=T]
     
     tes[name %in% small_line, pass:=F]
     # This should go at the end of the filters
@@ -1036,10 +1039,10 @@ stats_tes <- function() {
     tes[grepl("#DNA", name) & st==T & type != "TIR", pass:=T]
     tes[grepl("#DNA", name) & st==T & type != "TIR", length:=7]
     tes[grepl("#DNA", name) & st==T & type != "TIR", type:="TIR"]
-    
+  
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
     tes[Ns > (nchar(seq) * opt$Ns), pass:=F]
- 
+    tes[grepl("#LINE", name) & maxRep> 50, pass:=T]
     lx(paste("TRs discards:", nrow(tes[pass==F])))
   }
   setwd("..")
