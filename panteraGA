@@ -343,7 +343,7 @@ parseONEview <- function(n) {
     }
 
     # ovall[,name:=paste0(">",i,"-",.I)]
-    ovall[,name:=paste0(">",name,.I)]
+    ovall[,name:=paste0(">",name),.I]
     if (i==1) { 
       ovret <- copy(ovall)
     } else {
