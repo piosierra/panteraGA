@@ -425,18 +425,20 @@ cdhit2 <- function(sequences, threshold) {
   hitcl[,name:=gsub("\\.\\.\\.","",name)]
 } 
 
-getgenomes <- function(input_string, n) {
+# Get number of instances by genome for each TE
+getgenomes <- function(input_string, n) { 
   values_str <- gsub("^#|#", "", input_string)
-  numbers <- as.integer(strsplit(values_str, "\\s*-\\s*")[[1]])
+  numbers <- strsplit(values_str, "\\s*-\\s*")[[1]]
   keys <- numbers[seq(1, length(numbers), by = 2)]
-  vals <- numbers[seq(2, length(numbers), by = 2)]
+  vals <- as.numeric(numbers[seq(2, length(numbers), by = 2)])
   result <- data.table(matrix(0, nrow = 1, ncol = n))
-  for (i in seq_along(keys)) {
-    if (keys[i] >= 1 && keys[i] <= n) {
-      set(result, i = 1L, j = keys[i], value = vals[i])
-    }
-  }
   colnames(result) <- gsub(".*/","",genomes)
+  for (i in seq_along(keys)) {
+    #if (keys[i] >= 1 && keys[i] <= n) {
+   #   set(result[1,which(keys[i] %in% colnames(result))] <- vals[i]
+      set(result, i = 1, j = which( colnames(result) %in% keys[i]), value = vals[i])
+    #}
+  }
   return(result)
 }
 
@@ -814,9 +816,8 @@ cluster_results <- function() {
                     tsds_motif <- Biostrings::consensusString(Biostrings::DNAStringSet(c(substr(edges$r,1,tsd_len),stri_reverse(substr(edges$l,1,tsd_len)))), ambiguityMap=IUPAC_CODE_MAP,
                                                              shift=0L, width=NULL)
                     
-                    gencounts <- table(gsub(">","",gsub("-.*","",seqs_clust$name)))
+                    gencounts <- table(gsub(">","",gsub("#.*","",seqs_clust$name)))
                     gencounts <- paste0("#",paste0(c(rbind(names(gencounts),gencounts)),collapse="-"),"#")
-                    
                     
                   } else {
                     cons <- toupper(paste0(unlist(as.character(seqs)), 
@@ -1205,6 +1206,7 @@ stats_tes <- function() {
                             "right_gap","polyA","orf1","orf2","orf3","maxTR","Ns")
 
   stats_data <- cbind(stats_data,gtab)
+  stats_data$gencount <- apply(gtab,1, function(x) {sum(x>0)})
   fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats"), 
          quote =  F, row.names = F, sep ="\t")
 }
