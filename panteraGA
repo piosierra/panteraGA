@@ -20,6 +20,7 @@ scriptPath <- normalizePath(dirname(sub("^--file=", "",
                                         cmdArgs[grep("^--file=",
                                                      cmdArgs)])))[1]
 
+### This was removed in singularity image
 if (!file.exists(file.path(scriptPath, "Rlibs"))) {
   dir.create(file.path(scriptPath, "Rlibs"))
 }
@@ -28,7 +29,7 @@ r["CRAN"] <- "https://cran.r-project.org"
 options(repos = r)
 })
 .libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
-
+####
 
 
 ###
@@ -428,7 +429,7 @@ cdhit2 <- function(sequences, threshold) {
 # Get number of instances by genome for each TE
 getgenomes <- function(input_string, n) { 
   values_str <- gsub("^#|#", "", input_string)
-  numbers <- strsplit(values_str, "\\s*-\\s*")[[1]]
+  numbers <- strsplit(values_str, "\\s*---\\s*")[[1]]
   keys <- numbers[seq(1, length(numbers), by = 2)]
   vals <- as.numeric(numbers[seq(2, length(numbers), by = 2)])
   result <- data.table(matrix(0, nrow = 1, ncol = n))
@@ -817,9 +818,8 @@ cluster_results <- function() {
                                                              shift=0L, width=NULL)
                     
                     gencounts <- table(gsub(">","",gsub("#.*","",seqs_clust$name)))
-                    gencounts <- paste0("#",paste0(c(rbind(names(gencounts),gencounts)),collapse="-"),"#")
-                    
-                  } else {
+                    gencounts <- paste0("#",paste0(c(rbind(names(gencounts),gencounts)),collapse="---"),"#")
+                  }  else {
                     cons <- toupper(paste0(unlist(as.character(seqs)), 
                                            collapse = ""))
                   }
