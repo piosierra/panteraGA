@@ -180,7 +180,7 @@ read_pars <- function() {
   }
   
   if (is.null(opt$identity2)) {
-    opt$identity2 <- 0.90
+    opt$identity2 <- 0.85
   }
   
   if (is.null(opt$min_cl)) {
@@ -831,14 +831,16 @@ cluster_results <- function() {
                   nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
                                 nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif, "_gens",gencounts,"@@")
                   if ((nchar(cons) >= opt$min_size) &
-                      alll-cutl > 10) {  # Remove clusters that include the edges, they are most likely segdups
+                      (alll-cutl) > 10) {  # Remove clusters that include the edges, they are most likely segdups
                     consensi <- rbindlist(list(consensi, data.table(name = nam, 
                                                                   seq = cons)))
-                  }
-                  alim <- data.table(name=names(alim),seq=alim)
-                  alim[,name:=paste0(">",gsub(">","",name))]
-                  wfasta(alim, paste0("../alignments/consensi_", start, "_",
-                                      end,"-",u, ".maf"))
+                    alim <- data.table(name=names(alim),seq=alim)
+                    alim[,name:=paste0(">",gsub(">","",name))]
+                    wfasta(alim, paste0("../alignments/",make.names(nam),".maf"))
+                    }
+
+                  # wfasta(alim, paste0("../alignments/consensi_", start, "_",
+                  #                     end,"-",u, ".maf"))
                   
                 }
               } 
@@ -916,6 +918,8 @@ classify_tes <- function() {
   tsd_c <- as.numeric(gsub("_tsdm.*","",gsub(".*_tsdc","", final$name)))
   tsd_m <- gsub("_gens.*","",gsub(".*_tsdm","", final$name))
   gencount <- gsub("@@.*","",gsub(".*_gens","", final$name))
+  oldnames <<- final$name
+  write(oldnames, "oldnames")
   final[, name := paste0(">", opt$lib_name, "_", 1:nrow(final), 
                          "-", gsub(".*-","",name))]
   wfasta(final, paste0(opt$lib_name, "-consensi.fa"))
@@ -999,7 +1003,7 @@ classify_tes <- function() {
   }
   final[, short_Prediction:=  gsub(".*/","",Prediction)]
   final[,ix:=1:.N, by = short_Prediction]
-  final <- final[order(-nchar(seq))]
+  final <- final[order(-nchar(seq))] 
   final[,tsd_l:=tsd_l]
   final[,tsd_c:=tsd_c]
   final[,tsd_m:=tsd_m]
@@ -1019,6 +1023,10 @@ stats_tes <- function() {
   lx("Stats start")
   tes <- final[, c("name", "seq", "cluster", "tsd_l","tsd_c","tsd_m","gencount")]
   file <- paste0(opt$lib_name, "-consensi.fa")
+  # Rename alignments
+  lapply(1:length(oldnames), function(x) {file.rename(paste0("alignments/",make.names(oldnames[x]),".maf"),
+                                                      paste0("alignments/",make.names(gsub(">","",tes$name[x])),".maf"))})
+  
   temp <- paste0("temp",make.names(gsub(".*/","",file)))
   dir.create(temp)
   setwd(temp)
@@ -1187,7 +1195,7 @@ stats_tes <- function() {
     tes[Ns > (nchar(seq) * opt$Ns), pass:=F]
     tes[grepl("#LINE", name) & maxRep> 50, pass:=T]
     lx(paste("TRs discards:", nrow(tes[pass==F])))
-  }
+  } 
   setwd("..")
   unlink(temp, recursive = TRUE)
   tes <- tes[order(-lente)]
