@@ -919,7 +919,7 @@ classify_tes <- function() {
   tsd_m <- gsub("_gens.*","",gsub(".*_tsdm","", final$name))
   gencount <- gsub("@@.*","",gsub(".*_gens","", final$name))
   oldnames <<- final$name
-  write(oldnames, "oldnames")
+  # write(oldnames, "oldnames")
   final[, name := paste0(">", opt$lib_name, "_", 1:nrow(final), 
                          "-", gsub(".*-","",name))]
   wfasta(final, paste0(opt$lib_name, "-consensi.fa"))
@@ -1093,11 +1093,11 @@ stats_tes <- function() {
     
     # Find elements which share TIR or LTR to good ones.
     te_data_mix <- merge(te_data_mix,
-                         tes[,c("name","lente", "orf1", "orf2", "orf3")]
+                         tes[,c("name","lente", "orf1", "orf2", "orf3","cluster")]
                          [,name:=gsub(">","",name)], by.x = "qseqid",
                          by.y="name")
     te_data_mix <- merge(te_data_mix,
-                         tes[,c("name","lente", "orf1", "orf2", "orf3")]
+                         tes[,c("name","lente", "orf1", "orf2", "orf3","cluster")]
                          [,name:=gsub(">","",name)], by.x = "sseqid",
                          by.y="name")
     te_data_mix[,lqgap:=.(min(qstart,qend)-1), by=.I]
@@ -1108,7 +1108,7 @@ stats_tes <- function() {
     te_data_mix[,cover:=length/min(lente.x,lente.y), by=.I]
     te_data_dups <- te_data_mix[cover>0.98 & pident>99 & abs((lente.y-lente.x) / max(lente.y,lente.x))<0.01 ]
     te_data_dups[,uname:=paste0(c(qseqid,sseqid)[order(c(qseqid,sseqid))], collapse = ""), .I]
-    te_data_dups <- te_data_dups[order(orf1.x-orf1.y)]
+    te_data_dups <- te_data_dups[order(cluster.x-cluster.y)]
     dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
     te_data_mix <- te_data_mix[!(qseqid %in% dups_list)]
     te_data_mix <- te_data_mix[!(sseqid %in% dups_list)]
