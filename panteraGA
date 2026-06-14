@@ -3,9 +3,9 @@
 # First version using FastGA alignments.
 # Improved stats and recovery of TEs
 # Dev version to include option to work with list of genomes.
+# Added annotation of polymorphisms in the genomes
 
-
-pantera_version <- "1.1.1"
+pantera_version <- "1.2.0"
 options(warn = 0)
 
 
@@ -807,9 +807,16 @@ cluster_results <- function() {
                     consstring <- paste0(as.numeric(conserv>=cons_threshold+.4),collapse = "")
                     
                     cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),]),collapse="")
-            
-                    cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[1]
-                    cons_e <- stri_locate_last_fixed(consstring,paste0(rep(1,max(2,(12-floor(sqrt(nrow(ali)-2))))),collapse =""))[2]
+                    get_sequence_value <- function(x) {
+                      ifelse(x == 2, 9,
+                             ifelse(x == 3, 7,
+                                    ifelse(x == 4, 6,
+                                           ifelse(x <= 8, 5,
+                                                  ifelse(x <= 13, 4,
+                                                         ifelse(x <= 20, 3, 2))))))
+                    }
+                    cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,get_sequence_value(nrow(ali))),collapse =""))[1]
+                    cons_e <- stri_locate_last_fixed(consstring,paste0(rep(1,get_sequence_value(nrow(ali))),collapse =""))[2]
                     edges <- data.table(l=stri_reverse(gsub("-","",substr(alim,1,cons_s-1))), r=gsub("-","",substr(alim,cons_e+1,nchar(alim[1]))))
                     tsds2 <- unlist(lapply(2:13,function(x){sum(substr(edges$r,1,x) == stri_reverse(substr(edges$l,1,x)))}))
                     tsd_len <- min(which(tsds2==max(tsds2),tsds2))+1
@@ -837,6 +844,7 @@ cluster_results <- function() {
                     alim <- data.table(name=names(alim),seq=alim)
                     alim[,name:=paste0(">",gsub(">","",name))]
                     wfasta(alim, paste0("../alignments/",make.names(nam),".maf"))
+                    
                     }
 
                   # wfasta(alim, paste0("../alignments/consensi_", start, "_",
@@ -1106,7 +1114,7 @@ stats_tes <- function() {
     te_data_mix[,rsgap:=.(lente.y-max(sstart,send)), by=.I]
     ## Remove dups
     te_data_mix[,cover:=length/min(lente.x,lente.y), by=.I]
-    te_data_dups <- te_data_mix[cover>0.98 & pident>99 & abs((lente.y-lente.x) / max(lente.y,lente.x))<0.01 ]
+    te_data_dups <- te_data_mix[cover>0.98 & pident>98 & abs((lente.y-lente.x) / max(lente.y,lente.x))<0.01 ]
     te_data_dups[,uname:=paste0(c(qseqid,sseqid)[order(c(qseqid,sseqid))], collapse = ""), .I]
     te_data_dups <- te_data_dups[order(cluster.x-cluster.y)]
     dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
@@ -1114,7 +1122,7 @@ stats_tes <- function() {
     te_data_mix <- te_data_mix[!(sseqid %in% dups_list)]
     
     ## Generate list of LINEs that are subsequence of a better one
-    te_data_mix_line <- te_data_mix[(grepl("LINE",qseqid) | grepl("LINE",sseqid)) & pident> 90 & cover > 0.98]
+    te_data_mix_line <- te_data_mix[(grepl("LINE",qseqid) | grepl("LINE",sseqid)) & pident> 98 & cover > 0.98]
     te_data_mix_line[,large:=qseqid]
     te_data_mix_line[lente.y>lente.x,large:=sseqid]
     
@@ -1154,10 +1162,10 @@ stats_tes <- function() {
     # Remove the dups detected
     tes <- tes[!(name %in% dups_list)]
     lx(paste("Removed dups:", length(dups_list)))
-    tes[,pass:=F]
+    tes[,pass:=T]
     tes[,sf:=gsub(".*#","",name), by=.I]
     tes[name %in% good_line[!(good_line %in% small_line)], pass:=T]
-    tes[grepl("#DIRS",name) & orf1 > 2000 & lente < 10000, pass:=T]
+    tes[grepl("DIRS",name) & (orf1 > 2000) & (lente < 10000), pass:=T]
     tes[grepl("Crypton",name), pass:=T]
     tes[grepl("#PLE",name), pass:=T]
     tes[grepl("#SINE",name) & lente < 500, pass:=T]
@@ -1165,11 +1173,10 @@ stats_tes <- function() {
     tes[name %in% ltr_reco$new, pass:=T]
     tes[name %in% good_tir, pass:=T]
     tes[name %in% tir_reco$new, pass:=T]
-    tes[grepl("#RC",name) & orf1> 2000, pass:=T]
+    tes[grepl("#RC",name), pass:=T]
     ucut <- kneedle(tes[,.N,cluster]$cluster,tes[,.N,cluster]$N)
     lx(paste("Unknown recovery cutpoint:", ucut[1]))
     tes[grepl("#Unknown",name) & cluster>max(5, ucut[1]) , pass:=T]
-    
     tes[name %in% small_line, pass:=F]
     # This should go at the end of the filters
     tes[is.na(pa),pa:=100]
@@ -1182,15 +1189,14 @@ stats_tes <- function() {
     tes[grepl("#Unknown",name) & type == "TIR" & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
     tes[grepl("#Unknown",name) & tsd_l > 3 & tsd_l < 7 & tsd_c >0.3 & type == "LTR" & length > 150 & lgap < 8 & rgap < 8 & TR2 == F, `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
     # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
-    tes[grepl("#Unknown",name) & lente < 500 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*","",name),"#SINE",collapse=""),pass=T), by=.I]
+    tes[grepl("#Unknown",name) & lente < 400 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*","",name),"#SINE",collapse=""),pass=T), by=.I]
     # Recover DNA elements with short tirs
     tes[,st:=short_tir(substr(seq,1,10), rc(substr(seq,nchar(seq)-9,nchar(seq)))), .I]
-    
     tes[st==T & is.na(type), type:="TIR"]
     tes[st==T & type=="TIR", lgap := 0]
     tes[st==T & type=="TIR", rgap := 0]
     tes[st==T & type=="TIR", length:=8]
-  
+    tes[st==T & grepl("DNA",name), pass:= T]
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
     tes[Ns > (nchar(seq) * opt$Ns), pass:=F]
     tes[grepl("#LINE", name) & maxRep> 50, pass:=T]
@@ -1218,10 +1224,32 @@ stats_tes <- function() {
 
   stats_data <- cbind(stats_data,gtab)
   stats_data$gen_count <- apply(gtab,1, function(x) {sum(x>0)})
-  fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats"), 
+  fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats.tsv"), 
          quote =  F, row.names = F, sep ="\t")
 }
 
+
+produce_annotation <- function() {
+  lx("Obtaining annotations")
+  dir.create("anno")
+  system(paste0("makeblastdb -in ", opt$lib_name,"-pantera-final.fa -out anno/pan -dbtype nucl 1> /dev/null"))
+  te_data <- fread(cmd= paste0("blastn -query pantera_lib_0.fa -db anno/pan -task blastn -num_threads ", 
+                               detectCores(), 
+                               " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"), header = F)
+  polys <- ffasta("pantera_lib_0.fa") 
+  polys[,l:=nchar(seq)]
+  polys[,name:=gsub(">","",name)]
+  te_data <- merge(te_data,polys,  by.x="V1", by.y ="name")
+  te_data <- te_data[l-V4<50]
+  annotations <- te_data[order(-V4),.(names = paste(V2, collapse = " | ")), V1]
+  annotations[,gen:=gsub("#.*","",V1)]
+  annotations[,chr:=gsub(":.*","",gsub(".*#","",V1))]
+  annotations[,start:=gsub("-.*","",gsub(".*:","",V1))]
+  annotations[,end:=gsub(".*-","",V1)]
+  dir.create("annotations")
+  lapply(unique(annotations$gen), function(x) {fwrite(annotations[gen==x,c("chr","start","end", "names")],paste0("annotations/",x,".bed"), col.names = F, sep ="\t")})
+  unlink("anno", recursive=TRUE)
+  }
 # Delete temporary files
 cleanup <- function() {
   
@@ -1280,6 +1308,7 @@ setwd(opt$output_folder)
 invisible(tryCatch({find_repeats()}, error = function(err) {
   end_pantera(paste("Error round 1 ->",geterrmessage()))
 }))
+
 invisible(tryCatch({cluster_results()}, error = function(err) {
   end_pantera(paste("Error round 2 ->",geterrmessage()))
 }))
@@ -1288,6 +1317,9 @@ invisible(tryCatch({final <- classify_tes()}, error = function(err) {
 }))
 invisible(tryCatch({stats_tes()}, error = function(err) {
   end_pantera(paste("Error Stats ->",geterrmessage()))
+}))
+invisible(tryCatch({produce_annotation()}, error = function(err) {
+  end_pantera(paste("Error Annotation ->",geterrmessage()))
 }))
 if (opt$debug == FALSE) {
   invisible(tryCatch({cleanup()}, error = function(err) {
