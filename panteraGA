@@ -125,6 +125,8 @@ read_pars <- function() {
       "Ns",             "n", 1, "integer",   # Max % of Ns allowed in a segment [0]
       "pA_bases",       "p", 1, "integer",   # Min number of bases of a polyA [10]
       "cl_size",        "u", 1, "integer",   # Max number of sequences to cluster [200] 
+      "anno_per",       "a", 1, "double",   # Percentage of coverage for annotation
+      "anno_div",       "z", 1, "double",   # Percentage of divergence for annotation
       "flanking",       "f", 1, "integer",   # Min length of flanking sequences [automatic]
       "verbose",        "v", 0, "logical",   # Show log messages
       "keep",           "k", 0, "logical",   # Keep alignment files
@@ -181,6 +183,14 @@ read_pars <- function() {
   
   if (is.null(opt$identity2)) {
     opt$identity2 <- 0.85
+  }
+  
+  if (is.null(opt$anno_per)) {
+    opt$anno_per <- 0.80
+  }
+  
+  if (is.null(opt$anno_div)) {
+    opt$anno_div <- 0.80
   }
   
   if (is.null(opt$min_cl)) {
@@ -542,16 +552,19 @@ make_alignments <- function(glist) {
     if (lgenomes<2) {
       end_pantera("At least two genomes needed in ", glist)
     }
+  tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
+  dir.create(tempf, showWarnings = F)
    for (i in 1:(lgenomes-1)) {
      lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " <-> ", gsub(".*/","",genomes[i+1]) ))
      if (!file.exists(paste0(opt$output_folder,"/pantera",i,".1aln"))) {
-         system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," ", genomes[i]," ", genomes[i+1]))
+         system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," -P",tempf," ", genomes[i]," ", genomes[i+1]))
      }
    }
     lx(paste0("Aligning ", gsub(".*/","",genomes[lgenomes]), " <-> ", gsub(".*/","",genomes[1]) ))
     if (!file.exists(paste0(opt$output_folder,"/pantera",lgenomes,".1aln"))) {
-    system(paste0("FastGA -1:",opt$output_folder,"/pantera",lgenomes," ", genomes[lgenomes]," ", genomes[1]))
+    system(paste0("FastGA -1:",opt$output_folder,"/pantera",lgenomes," -P",tempf," ", genomes[lgenomes]," ", genomes[1]))
     }
+    unlink(tempf, recursive = T)
     return(lgenomes)
   }
 
@@ -1245,20 +1258,27 @@ stats_tes <- function() {
 produce_annotation <- function() {
   lx("Obtaining annotations")
   dir.create("anno")
-  system(paste0("makeblastdb -in ", opt$lib_name,"-pantera-final.fa -out anno/pan -dbtype nucl 1> /dev/null"))
-  te_data <- fread(cmd= paste0("blastn -query pantera_lib_0.fa -db anno/pan -task blastn -num_threads ", 
+  system(paste0("makeblastdb -in pantera_lib_0.fa -out anno/pan -dbtype nucl 1> /dev/null"))
+  te_data <- fread(cmd= paste0("blastn -query ", opt$lib_name,"-pantera-final.fa -db anno/pan -task blastn -num_threads ", 
                                detectCores(), 
-                               " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"), header = F)
-  polys <- ffasta("pantera_lib_0.fa") 
+                               " -evalue 500 -outfmt 6"), header = F)
+  polys <- ffasta(paste0(opt$lib_name,"-pantera-final.fa"))
   polys[,l:=nchar(seq)]
+  polys$seq <- NULL
   polys[,name:=gsub(">","",name)]
   te_data <- merge(te_data,polys,  by.x="V1", by.y ="name")
-  te_data <- te_data[l-V4<50]
-  annotations <- te_data[order(-V4),.(names = paste(V2, collapse = " | ")), V1]
-  annotations[,gen:=gsub("#.*","",V1)]
-  annotations[,chr:=gsub(":.*","",gsub(".*#","",V1))]
-  annotations[,start:=gsub("-.*","",gsub(".*:","",V1))]
-  annotations[,end:=gsub(".*-","",V1)]
+  te_data[,p:=V4/l]
+  te_data <- te_data[(p>=opt$anno_per) & (V3>= 100*opt$anno_div)]
+  te_data[,start:=gsub("-.*","",gsub(".*:","",V2))]
+  te_data[,end:=gsub(".*-","",V2)]
+  te_data[,l2:=as.numeric(end)-as.numeric(start)]
+  te_data[,d2:=l2/l]
+  te_data <- te_data[d2>= opt$anno_div & d2<= (2-opt$anno_div)]
+  annotations <- te_data[order(-V4),.(names = paste(V1, collapse = " | ")), V2]
+  annotations[,gen:=gsub("#.*","",V2)]
+  annotations[,chr:=gsub(":.*","",gsub(".*#","",V2))]
+  annotations[,start:=gsub("-.*","",gsub(".*:","",V2))]
+  annotations[,end:=gsub(".*-","",V2)]
   dir.create("annotations")
   lapply(unique(annotations$gen), function(x) {fwrite(annotations[gen==x,c("chr","start","end", "names")],paste0("annotations/",x,".bed"), col.names = F, sep ="\t")})
   unlink("anno", recursive=TRUE)
@@ -1339,6 +1359,11 @@ if (opt$debug == FALSE) {
   invisible(tryCatch({cleanup()}, error = function(err) {
     end_pantera(paste("Error Cleanning up ->",geterrmessage()))
   }))
+} else {
+  setwd(current)
+  lx(paste0(   "\u001b[32;2m",
+               "\u263A",
+               "\u001b[0m : ","End of process."))
 }
 
 
