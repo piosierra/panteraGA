@@ -6,6 +6,17 @@ Only the full releases include the necesary files. If you just clone the reposit
 
 This new version of [**pantera**](https://github.com/piosierra/pantera) aligns one or more genomes with [**FastGA**](https://github.com/thegenemyers/FASTGA) to generate TE libraries in just minutes for most species, and can handle large, over 10Gb genomes, in a few hours. Rather than performing an all vs all alignment, in the case of more than two genomes, pairwise aligments will be generated on the list of genomes, and all the polymorphic segments processed together afterwards. 
 
+### The easy way
+Build a singularity image from the Docker container:
+`singularity pull panteraGA.sif docker://piosierra/pantera_ga:latest`
+Run pantera:
+`singularity exec panteraGA.sif panteraGA -g listofgenomes -b identifier -o outputfolder
+
+- List of genomes is a plain text file with the paths to the genomes you want to use to build the library (min 2)
+- Identifier is the name to append to element names in the library
+
+
+
 ### 0- Requirements
 
 In addition to FastGA to build the alignments, **pantera** requires that several utilities are available on the path:

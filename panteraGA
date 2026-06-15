@@ -233,10 +233,26 @@ ffasta <- function(f) {
 }
 
 ## Writes a fasta file
+# wfasta <- function(fasta_data, f) {
+#   fileconn <- file(f)
+#   writeLines(t(fasta_data), fileconn)
+#   close(fileconn)
+# }
 wfasta <- function(fasta_data, f) {
-  fileconn <- file(f)
+  # 1. Clean path slashes and find the target directory
+  f <- normalizePath(f, winslash = "/", mustWork = FALSE)
+  dir_path <- dirname(f)
+  
+  # 2. Create the directory if it does not exist
+  if (!dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE)
+  }
+  
+  # 3. Safely open, write, and close the file connection
+  fileconn <- file(f, open = "w")
+  on.exit(close(fileconn)) # Ensures connection closes even if writing fails
+  
   writeLines(t(fasta_data), fileconn)
-  close(fileconn)
 }
 
 ## Original code from: https://github.com/etam4260/kneedle/blob/main/R/kneedle.R
@@ -396,7 +412,7 @@ reformatDNA <- function(dna) {
 
 # Calls and processes cdhit
 cdhit1 <- function(sequences, threshold) {
-  fname <- paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse="")
+  fname <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse=""))
   wfasta(sequences[,1:2],fname)
   system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
   hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
@@ -544,7 +560,6 @@ find_repeats <- function() {
   process_zone <- function(zone) {
     start <- as.numeric(zone[1]) - zones_interval_overlap
     end <- as.numeric(zone[2]) + zones_interval_overlap
-    discards <- 0
     if (start != end) {
       # If they have the same value they were processed in another zone
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
@@ -754,7 +769,6 @@ cluster_results <- function() {
   process_zone_2 <- function(zone) {
     start <- as.numeric(zone[1]) - zones_interval_overlap
     end <- as.numeric(zone[2]) + zones_interval_overlap
-    discards <- 0
     if (start != end) {
      #    lx(paste("Procesing segments:", start, "-", end))
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
@@ -843,7 +857,7 @@ cluster_results <- function() {
                                                                   seq = cons)))
                     alim <- data.table(name=names(alim),seq=alim)
                     alim[,name:=paste0(">",gsub(">","",name))]
-                    wfasta(alim, paste0("../alignments/",make.names(nam),".maf"))
+                    wfasta(alim, paste0("../alignments/",substr(make.names(nam),1,36),".maf"))
                     
                     }
 
@@ -862,8 +876,8 @@ cluster_results <- function() {
         }
       }
     }
-    #    lx(paste("Zone:", start, "completed."))
-    return(discards)
+      #  lx(paste("Zone:", start, "completed."))
+    return()
   }
   
   zones_interval <- 300
@@ -908,8 +922,7 @@ cluster_results <- function() {
       mc.preschedule = FALSE,
       mc.cores = opt$threads
     )
-    #    lx(paste("Total sequences discarded:", 
-    #             sum(as.numeric(unlist(loop_exit)))))
+        lx(paste("Output Loop 2 :", unlist(loop_exit)))
     system("cat consen*.fa >> ../all_consensi.fa")
     setwd("..")
   }
@@ -1032,7 +1045,7 @@ stats_tes <- function() {
   tes <- final[, c("name", "seq", "cluster", "tsd_l","tsd_c","tsd_m","gencount")]
   file <- paste0(opt$lib_name, "-consensi.fa")
   # Rename alignments
-  lapply(1:length(oldnames), function(x) {file.rename(paste0("alignments/",make.names(oldnames[x]),".maf"),
+  lapply(1:length(oldnames), function(x) {file.rename(paste0("alignments/",substr(make.names(oldnames[x]),1,36),".maf"),
                                                       paste0("alignments/",make.names(gsub(">","",tes$name[x])),".maf"))})
   
   temp <- paste0("temp",make.names(gsub(".*/","",file)))
@@ -1254,6 +1267,7 @@ produce_annotation <- function() {
 cleanup <- function() {
   
   lx("Library succesfully created.")
+  unlink("alignments/X.CONS*")
   unlink("loop_1", recursive = TRUE)
   unlink("loop_2", recursive = TRUE)
   unlink("orfs.tbl")
