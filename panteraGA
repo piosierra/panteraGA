@@ -327,9 +327,9 @@ parseONEview <- function(n) {
   lx(paste("Procesing ", n, " alignments"))
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
-    system(paste0("svfind -x 12 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa -b ",opt$output_folder,"/",opt$lib_name,"hapb ", f, " > /dev/null 2>&1"))
-    if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))>0) {
-    ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa"), fill = T)
+    system2("svfind", args = paste0(" -x 20 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
+    if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
+    ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
     if (nrow(ov)>0) {
     ov[,f:="a"]
     sequences <- ov[V1=="S",2:3][,V2:=as.numeric(V2)]
@@ -349,11 +349,14 @@ parseONEview <- function(n) {
     ovall <- ovall[seq_len >= opt$min_size & seq_len <= opt$max_size]
     lx(paste("Total segments filtered =", nrow(ovall)))
     if (opt$flanking == 100) {
-      kneedle_data <- data.table(flanks=c(ovall$flank_r,ovall$flank_l))[,b:=flanks %/% 100][,.N,b][order(b)]
-      opt$flanking <- tryCatch({kneedle(kneedle_data$b,kneedle_data$N)[1]*100},error = function(msg){return(2001)})
+      f_data <- data.table(flanks=c(ovall$flank_r,ovall$flank_l))[,b:=flanks %/% 100][,.N,b][order(b)]
+      f_data[, l:=b*N]
+      f_data[, p:=100*cumsum(l)/sum(l)]
+      tmpflanking <-f_data[p>20][1]$b*100
+    #  tmpflanking <- tryCatch({kneedle(kneedle_data$b,kneedle_data$N)[1]*100},error = function(msg){return(2001)})
     }
-    lx(paste("Flanking sequences cutpoint = ", opt$flanking))
-    ovcut <- ovall[flank_l>=opt$flanking & flank_r>=opt$flanking]
+    lx(paste("Flanking sequences cutpoint = ", tmpflanking))
+    ovcut <- ovall[flank_l>=tmpflanking & flank_r>=tmpflanking]
     ### Remove all but one copy when the same segment can map to several places.
     ovall <-ovall[order(file,v_name,v_start)]
     ovall[,ov:=shift(v_start,-1), by=v_name]
@@ -361,8 +364,9 @@ parseONEview <- function(n) {
     ovall[is.na(ov) ,ov:=1]
     ovall[ov < -seq_len ,ov:=1]
     ovall <- ovall[ov>0]
-    unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
-    unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
+    unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
+    # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
+    # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
     ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
     ovall <- ovall[Ns <= (nchar(seq) * opt$Ns)]
     lx(paste("Number of valid Ns segments =", nrow(ovall)))
@@ -964,7 +968,7 @@ classify_tes <- function() {
     paste0(
       "getorf -sequence ",
       file,
-      " --outseq temp.orfs -minsize 300 &>/dev/null; blastp -num_threads ",detectCores()," -query temp.orfs -db ",
+      " --outseq temp.orfs -minsize 100 &>/dev/null; blastp -num_threads ",detectCores()," -query temp.orfs -db ",
       scriptPath,
       "/libs/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
     )
@@ -1028,7 +1032,7 @@ classify_tes <- function() {
   
   lx("Merge")
   tes <- ffasta(file)
-  if (exists("result")) {
+  if (nrow(result) > 0) {
     final <- merge(tes, result, all.x = T)
     final[is.na(Prediction), Prediction := "Unknown"]
   } else {
