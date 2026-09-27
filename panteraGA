@@ -327,7 +327,7 @@ parseONEview <- function(n) {
   lx(paste("Procesing ", n, " alignments"))
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
-    system2("svfind", args = paste0(" -x 20 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
+    system2("svfind", args = paste0(" -x 100 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
     if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
     ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
     if (nrow(ov)>0) {
@@ -557,13 +557,16 @@ make_alignments <- function(glist) {
       end_pantera("At least two genomes needed in ", glist)
     }
   tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
-  dir.create(tempf, showWarnings = F)
+  
    for (i in 1:(lgenomes-1)) {
+     dir.create(tempf, showWarnings = F)
      lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " <-> ", gsub(".*/","",genomes[i+1]) ))
      if (!file.exists(paste0(opt$output_folder,"/pantera",i,".1aln"))) {
          system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," -P",tempf," ", genomes[i]," ", genomes[i+1]))
      }
+     unlink(tempf, recursive = T)
    }
+    dir.create(tempf, showWarnings = F)
     lx(paste0("Aligning ", gsub(".*/","",genomes[lgenomes]), " <-> ", gsub(".*/","",genomes[1]) ))
     if (!file.exists(paste0(opt$output_folder,"/pantera",lgenomes,".1aln"))) {
     system(paste0("FastGA -1:",opt$output_folder,"/pantera",lgenomes," -P",tempf," ", genomes[lgenomes]," ", genomes[1]))
@@ -834,8 +837,8 @@ cluster_results <- function() {
                     cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
                     dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
                     saturation <- unlist(lapply(dtMatrix[1:4],sum))/length(seqs)
-                    conserv <- unlist(lapply(dtMatrix[1:4],max))/length(seqs)
-                    consstring <- paste0(as.numeric(conserv>=cons_threshold+.4),collapse = "")
+                    conserv <- unlist(lapply(dtMatrix[1:4],max))/(saturation*length(seqs))
+                    consstring <- paste0(as.numeric(conserv>=conserv_threshold & saturation >= sat_threshold),collapse = "")
                     
                     cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),]),collapse="")
                     get_sequence_value <- function(x) {
@@ -900,7 +903,8 @@ cluster_results <- function() {
   zones_interval <- 300
   zones_interval_overlap <- 0
   cons_threshold <- 0.4
-  saturation_threshold <- 0.6
+  conserv_threshold <- 0.8
+  sat_threshold <- 0.4
   opt$cl_size <- 1000
   segments_unique <- ffasta("segments_candidates.fa")
   if (nrow(segments_unique) > 0) {
