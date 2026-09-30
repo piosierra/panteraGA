@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0]
+## [1.3.0]
 
 First version distributed through bioconda (`conda install -c conda-forge -c bioconda panteraga`).
 The XGBoost model is now downloaded from Zenodo (doi:10.5281/zenodo.22990589) and is no longer stored in git.
