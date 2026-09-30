@@ -89,7 +89,7 @@ read_pars <- function() {
   
   opt <- getopt(spec)
   if (!is.null(opt$help)) {
-    cat(gsub("\\] \\[","\\]\n\\[",getopt(spec, usage = TRUE)))
+    cat(gsub("\\] \\[","\\]\n\\[",getopt(spec, usage = TRUE, command = "panteraGA")))
     q(status = 0)
   }
   
