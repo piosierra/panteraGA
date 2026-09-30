@@ -1,0 +1,44 @@
+# Changelog
+
+## [1.2.0]
+
+First version distributed through bioconda (`conda install -c conda-forge -c bioconda panteraga`).
+The XGBoost model is now downloaded from Zenodo (doi:10.5281/zenodo.22990589) and is no longer stored in git.
+
+### Packaging
+- R packages are no longer installed at runtime; all dependencies come from conda. `qualV` removed.
+- The install location is resolved through symlinks; `PANTERA_HOME` overrides it.
+- Startup checks for all required tools and data files, including detection of a Git LFS pointer in place of the model.
+- `-h` exits with status 0; errors exit with status 1 and are reported on stderr.
+- Portable shell redirection (`>/dev/null 2>&1`).
+
+### Fixed
+- `-y/--identity2` was ignored (round 2 clustered at `-i`).
+- `-p` (polyA length) was ignored; the long option is now `--pAs`.
+- `-n` is now a double (was declared integer).
+- `-T` now also limits BLAST; mafft runs single-threaded inside the parallel workers.
+- The flanking filter was computed but never applied; `-f` other than 100 crashed.
+- LTR reclassification used the TIR table.
+- Pass logic is now explicitly "fail unless rescued".
+- Crashes on edge cases: no ORF hits, no self-BLAST hits, empty svfind output, `kneedle` failures, clusters without a conserved block.
+- Per-consensus data (cluster size, TSD, genome counts) could be swapped between elements of equal length.
+- Element names now match the final class (`<class>_<n>-<lib>#<class>`), numbered by length within class; alignment files renamed to match and reverse-complemented when the consensus is flipped (`_R_` prefix toggled).
+- The null base composition for TSD statistics was always 0.25; it is now computed from the flanks.
+
+### Changed
+- Flanking filter: discards the fraction `-q` of segments with the shortest flank (the previous rule removed ~95% of segments).
+- Consensus ties: transition ties (A/G, C/T) resolve to A/C; other ties become N. Consensus threshold 0.3.
+- Edge search: inward shifts cannot exceed the TSD length.
+- TSD support is tested for significance (binomial, corrected for the lengths and edge positions tried).
+- Edge/TSD search rewritten (13–20x faster, identical results).
+- Terminal TIR finder (anchored local alignment with a shuffled null, p <= 0.01) replaces the `short_tir` heuristic.
+- Unknown elements with TG...CA termini and a 4–6 bp TSD (confidence > 0.8) are reclassified as LTR.
+- DNA elements with a TIR within 8 bp of both ends pass.
+- LINEs pass with a 3' tail (polyA or short tandem repeat) or 3'-anchored relatives.
+
+### Added
+- Options `-q/--flank_quantile` (default 0.05) and `-c/--cons_Ns` (default 0.02).
+- Stats columns `homology_class`, `homology_prob`, `tail3_motif`, `tail3_len`, `tail5_motif`, `tail5_len`, `tr3_relatives`, `fragment_of`.
+
+## [1.1.0]
+- Previous release (conda-free installation, model in Git LFS).
