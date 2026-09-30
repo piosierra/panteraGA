@@ -29,6 +29,8 @@ docker run --rm --platform linux/amd64 \
     conda install -y -q -n base conda-build conda-index
     # Faster packaging of the 830 MB model (only affects this local test)
     printf "conda_build:\n  zstd_compression_level: 3\n" >> ~/.condarc
+    # C standard library version, as bioconda CI sets it (needed by stdlib("c"))
+    printf "c_stdlib:\n  - sysroot\nc_stdlib_version:\n  - \"2.17\"\n" > ~/conda_build_config.yaml
     # Make /bld a valid (possibly empty) local channel
     mkdir -p /bld/noarch /bld/linux-64
     python -m conda_index /bld

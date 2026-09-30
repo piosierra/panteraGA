@@ -17,6 +17,7 @@ build:
 requirements:
   build:
     - {{ compiler('c') }}
+    - {{ stdlib('c') }}
     - make
   host:
     - zlib
@@ -37,5 +38,8 @@ about:
   dev_url: https://github.com/richarddurbin/alntools
 
 extra:
+  additional-platforms:
+    - linux-aarch64
+    - osx-arm64
   recipe-maintainers:
     - piosierra
