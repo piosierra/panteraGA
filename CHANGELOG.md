@@ -4,6 +4,8 @@
 
 ### Fixed
 - When the genome list gave files with a folder (e.g. `genomes/sp1.fa` or an absolute path), clustering failed in most length windows and those segments were silently lost; typically all polymorphisms shorter than ~1.5 kb. Genome lists with plain file names were not affected.
+### Changed
+- The `name` column of `*-pantera-final.stats.tsv` no longer starts with `>`, so it matches the element names directly.
 
 ## [1.3.0]
 
