@@ -3,7 +3,6 @@
 .RData
 .Ruserdata
 panteraGA.Rproj
-.gitattributes
 .pantera.config
 
 # Model: downloaded from Zenodo (https://zenodo.org/records/22990589), never in git
