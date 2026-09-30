@@ -7,7 +7,7 @@ package:
 
 source:
   - url: https://github.com/piosierra/panteraGA/archive/refs/tags/v{{ version }}.tar.gz
-    sha256: FILL_IN_AFTER_TAGGING
+    sha256: 423783360b1c30064927c044a2292442acd42c444bfe4c1b86d810100c89c998
   - url: https://zenodo.org/records/22990589/files/model.tar.gz
     sha256: 51c7cfed52a94428e0b8f5f0777b4a77d4be839004667c4047c727d65685aa2e
     folder: zenodo_model
