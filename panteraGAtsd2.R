@@ -1,5 +1,7 @@
 #!/usr/bin/env Rscript
 
+### VERSION BEFORE FIXING NAMING
+
 # First version using FastGA alignments.
 # Improved stats and recovery of TEs
 # Dev version to include option to work with list of genomes.
@@ -10,26 +12,24 @@ options(warn = 0)
 
 
 ###
-### Find the path of the script and create an Rlibs folder to store the 
-### required libraries if they are missing in case the user has no persmission 
-### in the default R folder, common in HPC systems.
+### Locate the installation folder (the one containing libs/ and model/).
+### normalizePath() is applied to the full script path so that symlinks such as
+### $PREFIX/bin/panteraGA resolve to the real install location.
+### The PANTERA_HOME environment variable overrides the detected location.
 ###
-
-cmdArgs <- commandArgs(trailingOnly = FALSE)
-scriptPath <- normalizePath(dirname(sub("^--file=", "",
-                                        cmdArgs[grep("^--file=",
-                                                     cmdArgs)])))[1]
-
-### This was removed in singularity image
-if (!file.exists(file.path(scriptPath, "Rlibs"))) {
-  dir.create(file.path(scriptPath, "Rlibs"))
+file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+pantera_script <- if (length(file_arg) > 0) {
+  normalizePath(sub("^--file=", "", file_arg[1]))
+} else {
+  ""
 }
-local({r <- getOption("repos")
-r["CRAN"] <- "https://cran.r-project.org"
-options(repos = r)
-})
-.libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
-####
+pantera_home <- Sys.getenv("PANTERA_HOME",
+                           unset = if (nzchar(pantera_script)) {
+                             dirname(pantera_script)
+                           } else {
+                             getwd()
+                           })
+
 
 
 ###
@@ -50,62 +50,16 @@ lx <- function(x) {
   ))
 }
 
-# Installs the required libraries. Probably I should include some messages.
+# Loads the required libraries. They are installed as dependencies by conda.
 get_libs <- function() {
-  
-  if (suppressPackageStartupMessages(!require("this.path", quietly = TRUE))) {
-    lx("Intalling package [this.path]")
-    install.packages("this.path", verbose =F) #
+  pkgs <- c("getopt", "parallel", "ips", "Biostrings", "stringi",
+            "ape", "xgboost", "quantmod", "data.table")
+  for (p in pkgs) {
+    if (!suppressPackageStartupMessages(require(p, character.only = TRUE,
+                                                quietly = TRUE))) {
+      stop("R package [", p, "] not found")
+    }
   }
-  if (suppressPackageStartupMessages(!require("getopt", quietly = TRUE))) {
-    lx("Intalling package [getopt]")
-    install.packages("getopt", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("parallel", quietly = TRUE))) {
-    lx("Intalling package [parallel]")
-    install.packages("parallel", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("qualV", quietly = TRUE))) {
-    lx("Intalling package [qualV]")
-    install.packages("qualV", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("ips", quietly = TRUE))) {
-    lx("Intalling package [ips]")
-    install.packages("ips", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("BiocManager", quietly = TRUE))) {
-    lx("Intalling package [BiocManager]")
-    install.packages("BiocManager", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("Biostrings", quietly = TRUE))) {
-    lx("Intalling package [Biostrings]")
-    BiocManager::install("Biostrings", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("stringi", quietly = TRUE))) {
-    lx("Intalling package [stringi]")
-    install.packages("stringi", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("ape", quietly = TRUE))) {
-    lx("Intalling package [ape]")
-    install.packages("ape", verbose =F) #
-  }
-  # if (suppressPackageStartupMessages(!require("LncFinder", quietly = TRUE))) {
-  #   lx("Intalling package [LncFinder]")
-  #   install.packages("LncFinder", verbose =F) #
-  # }
-  if (suppressPackageStartupMessages(!require("xgboost", quietly = TRUE))) {
-    lx("Intalling package [xgboost]")
-    install.packages("xgboost", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("quantmod", quietly = TRUE))) {
-    lx("Intalling package [quantmod]")
-    install.packages("quantmod", verbose =F) #
-  }
-  if (suppressPackageStartupMessages(!require("data.table", quietly = TRUE))) {
-    lx("Intalling package [data.table]")
-    install.packages("data.table", verbose =F) #
-  }
-  
 }
 
 # Reads parameters
@@ -122,12 +76,14 @@ read_pars <- function() {
       "identity2",      "y", 1, "double",    # Cutoff (as distance) to cluster in second pass [0.05]
       "min_cl",         "m", 1, "integer",   # Min number of sequences required to cluster [3]
       "mingen",         "e", 1, "integer",   # Min number of sequences in one genome to cluster [2]
-      "Ns",             "n", 1, "integer",   # Max % of Ns allowed in a segment [0]
-      "pA_bases",       "p", 1, "integer",   # Min number of bases of a polyA [10]
+      "Ns",             "n", 1, "double",   # Max % of Ns allowed in a segment [0]
+      "pAs",            "p", 1, "integer",   # Min number of bases of a polyA [10]
       "cl_size",        "u", 1, "integer",   # Max number of sequences to cluster [200] 
+      "cons_Ns",        "c", 1, "double",    # Max fraction of Ns in a final consensus [0.02]
       "anno_per",       "a", 1, "double",   # Percentage of coverage for annotation
       "anno_div",       "z", 1, "double",   # Percentage of divergence for annotation
       "flanking",       "f", 1, "integer",   # Min length of flanking sequences [automatic]
+      "flank_quantile", "q", 1, "double",    # Fraction of segments with the shortest flanks to discard [0.05]
       "verbose",        "v", 0, "logical",   # Show log messages
       "keep",           "k", 0, "logical",   # Keep alignment files
       "debug",          "d", 0, "logical",   # Keep intermediate files
@@ -137,7 +93,7 @@ read_pars <- function() {
   opt <- getopt(spec)
   if (!is.null(opt$help)) {
     cat(gsub("\\] \\[","\\]\n\\[",getopt(spec, usage = TRUE)))
-    q(status = 1)
+    q(status = 0)
   }
   
   if (is.null(opt$verbose)) {
@@ -147,8 +103,16 @@ read_pars <- function() {
   if (is.null(opt$debug)) {
     opt$debug <- FALSE
   }
+  if (is.null(opt$flank_quantile)) {
+    opt$flank_quantile <- 0.05
+  }
   if (is.null(opt$keep)) {
     opt$keep <- FALSE
+  }
+  
+  if (is.null(opt$cons_Ns)) {
+    # Consensus Ns are ambiguous alignment columns, not assembly gaps
+    opt$cons_Ns <- 0.02
   }
   
   if (is.null(opt$genomes)) {
@@ -206,9 +170,9 @@ read_pars <- function() {
     opt$Ns <- 0.001
   }
   
-  if (is.null(opt$pas)) {
+  if (is.null(opt$pAs)) {
     # Length of polyA.
-    opt$pas <- 10
+    opt$pAs <- 10
   }
   
   if (is.null(opt$pag)) {
@@ -263,6 +227,16 @@ wfasta <- function(fasta_data, f) {
   on.exit(close(fileconn)) # Ensures connection closes even if writing fails
   
   writeLines(t(fasta_data), fileconn)
+}
+
+# Reverse-complements an alignment file in place, keeping the columns aligned.
+# Sequence names get mafft's "_R_" prefix (or lose it, if they already had it),
+# so the prefix always tells which copies are shown reversed relative to the genome.
+rc_alignment <- function(f) {
+  a <- ffasta(f)
+  a[, seq := stri_reverse(chartr("ACGTRYKMBDHVacgtrykmbdhv", "TGCAYRMKVHDBtgcayrmkvhdb", seq))]
+  a[, name := ifelse(startsWith(name, ">_R_"), sub("^>_R_", ">", name), sub("^>", ">_R_", name))]
+  wfasta(a, f)
 }
 
 ## Original code from: https://github.com/etam4260/kneedle/blob/main/R/kneedle.R
@@ -325,61 +299,65 @@ kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
 # Reads the two ONEcode files extracted from a 1aln file with svfind
 parseONEview <- function(n) {
   lx(paste("Procesing ", n, " alignments"))
+  ovret <- data.table(name = character(), seq = character())
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
     system2("svfind", args = paste0(" -x 100 -s 50 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
     if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
       ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
-      if (nrow(ov)>0) {
-        ov[,f:="a"]
-        sequences <- ov[V1=="S",2:3][,V2:=as.numeric(V2)]
-        file <- ov[V1=="S",f]
-        overhangs <- ov[V1=="Q",2:3][,V2:=as.numeric(V2)]
-        flanks <- ov[V1=="F",2:3][,V2:=as.numeric(V2)][,V3:=as.numeric(V3)]
-        name <- ov[V1=="I",3]
-        variant <- ov[V1=="V",3:5][,V4:=as.numeric(V4)][,V5:=as.numeric(V5)]
-        source <- ov[V1=="B",3:5][,V4:=as.numeric(V4)][,V5:=as.numeric(V5)]
-        ovall <- cbind(file,name,variant[,1:3], source[,1:3],flanks[,1:2], sequences[,1:2], overhangs[,1:2])
-        colnames(ovall) <- c("file","name","v_name", "v_start","v_end","s_name", "s_start","s_end", "flank_l", "flank_r", "seq_len","seq","ov_len","overhang")
-        ovall[, name:=paste0(genomes[i],"#",v_name,":",v_start,"-",v_end),.I]
-        lx(paste("Total segments in 1aln =", nrow(ovall)))
-        ## Remove segments that map to the same spot, we remove the last digit to account for small missmatches in the breakpoint
-        ovall[,ins_point :=paste0(file,"-",s_name,":",substr(s_start,1,nchar(s_start)-1),"-",substr(s_end,1,nchar(s_end)-1))]
-        ovall <- ovall[!(ins_point %in% ovall$ins_point[duplicated(ovall$ins_point)]) ]  
-        ovall <- ovall[seq_len >= opt$min_size & seq_len <= opt$max_size]
-        lx(paste("Total segments filtered =", nrow(ovall)))
-        if (opt$flanking == 100) {
-          f_data <- data.table(flanks=c(ovall$flank_r,ovall$flank_l))[,b:=flanks %/% 100][,.N,b][order(b)]
-          f_data[, l:=b*N]
-          f_data[, p:=100*cumsum(l)/sum(l)]
-          tmpflanking <-f_data[p>20][1]$b*100
-          #  tmpflanking <- tryCatch({kneedle(kneedle_data$b,kneedle_data$N)[1]*100},error = function(msg){return(2001)})
+        if (nrow(ov)>0) {
+          ov[,f:="a"]
+          sequences <- ov[V1=="S",2:3][,V2:=as.numeric(V2)]
+          file <- ov[V1=="S",f]
+          overhangs <- ov[V1=="Q",2:3][,V2:=as.numeric(V2)]
+          flanks <- ov[V1=="F",2:3][,V2:=as.numeric(V2)][,V3:=as.numeric(V3)]
+          name <- ov[V1=="I",3]
+          variant <- ov[V1=="V",3:5][,V4:=as.numeric(V4)][,V5:=as.numeric(V5)]
+          source <- ov[V1=="B",3:5][,V4:=as.numeric(V4)][,V5:=as.numeric(V5)]
+          ovall <- cbind(file,name,variant[,1:3], source[,1:3],flanks[,1:2], sequences[,1:2], overhangs[,1:2])
+          colnames(ovall) <- c("file","name","v_name", "v_start","v_end","s_name", "s_start","s_end", "flank_l", "flank_r", "seq_len","seq","ov_len","overhang")
+          ovall[, name:=paste0(genomes[i],"#",v_name,":",v_start,"-",v_end),.I]
+          lx(paste("Total segments in 1aln =", nrow(ovall)))
+          ## Remove segments that map to the same spot, we remove the last digit to account for small missmatches in the breakpoint
+          ovall[,ins_point :=paste0(file,"-",s_name,":",substr(s_start,1,nchar(s_start)-1),"-",substr(s_end,1,nchar(s_end)-1))]
+          ovall <- ovall[!(ins_point %in% ovall$ins_point[duplicated(ovall$ins_point)]) ]  
+          ovall <- ovall[seq_len >= opt$min_size & seq_len <= opt$max_size]
+          lx(paste("Total segments filtered =", nrow(ovall)))
+
+          if (opt$debug) {
+            fwrite(ovall[, .(flank_l, flank_r, seq_len)],
+                   paste0(opt$output_folder, "/flanks_", i, ".tsv"), sep = "\t")
+          }
+          
+          if (opt$flanking == 100) {
+            mf <- pmin(ovall$flank_l, ovall$flank_r)
+            tmpflanking <- if (length(mf) > 0 && opt$flank_quantile > 0) {
+              as.numeric(quantile(mf, opt$flank_quantile, type = 1))
+            } else {
+              0
+            }
+          } else {
+            tmpflanking <- opt$flanking
+          }
+          lx(paste("Flanking sequences cutpoint = ", tmpflanking))
+          ovcut <- ovall[flank_l>=tmpflanking & flank_r>=tmpflanking]
+          ### Remove all but one copy when the same segment can map to several places.
+          ovall <-ovcut[order(file,v_name,v_start)]
+          ovall[,ov:=shift(v_start,-1), by=v_name]
+          ovall[,ov:=ov-v_end]
+          ovall[is.na(ov) ,ov:=1]
+          ovall[ov < -seq_len ,ov:=1]
+          ovall <- ovall[ov>0]
+          unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
+          # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
+          # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
+          ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
+          ovall <- ovall[Ns <= (nchar(seq) * opt$Ns)]
+          lx(paste("Number of valid Ns segments =", nrow(ovall)))
+          ovall[, name := paste0(">", name), .I]
+          ovret <- rbind(ovret, ovall[, c("name", "seq")])
         }
-        lx(paste("Flanking sequences cutpoint = ", tmpflanking))
-        ovcut <- ovall[flank_l>=tmpflanking & flank_r>=tmpflanking]
-        ### Remove all but one copy when the same segment can map to several places.
-        ovall <-ovall[order(file,v_name,v_start)]
-        ovall[,ov:=shift(v_start,-1), by=v_name]
-        ovall[,ov:=ov-v_end]
-        ovall[is.na(ov) ,ov:=1]
-        ovall[ov < -seq_len ,ov:=1]
-        ovall <- ovall[ov>0]
-        unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
-        # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
-        # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
-        ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
-        ovall <- ovall[Ns <= (nchar(seq) * opt$Ns)]
-        lx(paste("Number of valid Ns segments =", nrow(ovall)))
-        
-      }
       
-      # ovall[,name:=paste0(">",i,"-",.I)]
-      ovall[,name:=paste0(">",name),.I]
-      if (i==1) { 
-        ovret <- copy(ovall)
-      } else {
-        ovret <- rbind(ovret,ovall)
-      }
     }
   }
   # ovret[,name:=paste0(">",.I)]
@@ -409,10 +387,96 @@ end_pantera <- function(message) {
 }
 
 ### Detection of small, degraded TIR
-short_tir <- function(a,b) {
-  lcs <- LCS(strsplit(a,"")[[1]], strsplit(b,"")[[1]])
-  return(nchar(paste0(lcs$LCS,collapse = ""))>7)
+
+# Anchored local alignment of a vs b: like Smith-Waterman, but an alignment may only
+# START within the first `max_start` bases of both sequences (it can end anywhere).
+# This makes terminal repeats compete only with other terminal candidates, instead of
+# losing to a higher-scoring internal repeat further in.
+sw_anchored <- function(a, b, max_start = 10, match = 2, mismatch = -3, gap = 5) {
+  a <- strsplit(a, "")[[1]]; b <- strsplit(b, "")[[1]]
+  n <- length(a); m <- length(b)
+  H <- matrix(-Inf, n + 1, m + 1)        # H[i+1, j+1]: best score of an alignment ending at a[i], b[j]
+  SI <- matrix(0L, n + 1, m + 1); SJ <- matrix(0L, n + 1, m + 1)
+  for (i in 0:min(n, max_start)) for (j in 0:min(m, max_start)) {
+    H[i + 1, j + 1] <- 0; SI[i + 1, j + 1] <- i + 1L; SJ[i + 1, j + 1] <- j + 1L   # allowed starts
+  }
+  best <- 0; bi <- 0; bj <- 0
+  for (i in 1:n) for (j in 1:m) {
+    d <- H[i, j] + if (a[i] == b[j] && a[i] != "N") match else mismatch
+    u <- H[i, j + 1] - gap; l <- H[i + 1, j] - gap
+    v <- max(H[i + 1, j + 1], d, u, l)      # H[i+1, j+1] is 0 where a new start is allowed
+    if (v > H[i + 1, j + 1]) {
+      if (v == d) { SI[i + 1, j + 1] <- SI[i, j]; SJ[i + 1, j + 1] <- SJ[i, j] }
+      else if (v == u) { SI[i + 1, j + 1] <- SI[i, j + 1]; SJ[i + 1, j + 1] <- SJ[i, j + 1] }
+      else { SI[i + 1, j + 1] <- SI[i + 1, j]; SJ[i + 1, j + 1] <- SJ[i + 1, j] }
+      H[i + 1, j + 1] <- v
+    }
+    if (H[i + 1, j + 1] > best) { best <- H[i + 1, j + 1]; bi <- i; bj <- j }
+  }
+  list(score = best, start_a = SI[bi + 1, bj + 1], start_b = SJ[bi + 1, bj + 1],
+       end_a = bi, end_b = bj)
 }
+
+# Terminal inverted repeat finder for degraded TIRs.
+# Aligns the first `win` bp with the reverse complement of the last `win` bp, allowing the
+# alignment to start only within `max_gap` bp of both ends, and tests its score against
+# shuffled copies of the left end (same base composition), aligned the same way.
+# With n_null = 100 the smallest possible p-value is 1/101.
+find_terminal_tir <- function(s, win = 50, max_gap = 10, n_null = 100, min_len = 8) {
+  n <- nchar(s)
+  if (n < 2 * win) win <- n %/% 2
+  left <- substr(s, 1, win)
+  right <- rc(substr(s, n - win + 1, n))
+  hit <- sw_anchored(left, right, max_start = max_gap)
+  len <- hit$end_a - hit$start_a + 1
+  if (hit$score <= 0 || len < min_len)
+    return(data.table(tir_len = 0, tir_lgap = NA_real_, tir_rgap = NA_real_, tir_p = 1))
+  lchars <- strsplit(left, "")[[1]]
+  null <- replicate(n_null, sw_anchored(paste(sample(lchars), collapse = ""), right,
+                                        max_start = max_gap)$score)
+  data.table(tir_len = len, tir_lgap = hit$start_a - 1, tir_rgap = hit$start_b - 1,
+             tir_p = (sum(null >= hit$score) + 1) / (n_null + 1))
+}
+
+
+# 3' tail detector: the longest short tandem repeat (unit 1-6 bp, polyA = unit 1)
+# ending within `max_offset` bp of the 3' end of the sequence. Periodicity is scored
+# position by position (base i equal to base i+unit), so point mutations in the tail
+# are tolerated: the tail must be at least `min_frac` periodic, start and end on a
+# periodic position, and span at least 3 units and `min_len` bp. On ties between unit
+# sizes the smallest unit is kept (a polyA is also periodic with unit 2, 3, ...).
+detect_tail <- function(s, win = 80, max_unit = 6, min_len = 12, max_offset = 10, min_frac = 0.85) {
+  none <- list(tail_len = 0L, tail_motif = "", tail_offset = NA_integer_)
+  s <- toupper(s)
+  n <- nchar(s)
+  x <- strsplit(substr(s, max(1, n - win + 1), n), "")[[1]]
+  L <- length(x)
+  best <- none
+  for (u in seq_len(max_unit)) {
+    if (L <= u + min_len) next
+    m <- x[1:(L - u)] == x[(1 + u):L] & x[1:(L - u)] != "N"     # m[i]: x[i] repeats at x[i+u]
+    for (off in 0:max_offset) {
+      b <- L - off                                              # candidate last tail base
+      if (b - u < 1 || !m[b - u]) next                          # tail must end on a periodic base
+      mm <- rev(m[1:(b - u)])                                   # walk leftwards from the end
+      frac <- cumsum(mm) / seq_along(mm)
+      k <- suppressWarnings(max(which(frac >= min_frac & mm)))
+      if (!is.finite(k)) next
+      len <- k + u
+      if (len >= max(min_len, 3 * u) && len > best$tail_len) {
+        a <- b - len + 1
+        units <- vapply(seq(a, b - u + 1, by = u), function(i) paste(x[i:(i + u - 1)], collapse = ""), "")
+        motif <- names(which.max(table(units)))
+        for (d in seq_len(u - 1)) {                             # report the minimal period:
+          if (u %% d == 0 && motif == strrep(substr(motif, 1, d), u / d)) { motif <- substr(motif, 1, d); break }
+        }                                                       # "AAAAA" -> "A", "AGAAGA" -> "AGA"
+        best <- list(tail_len = len, tail_motif = motif, tail_offset = off)
+      }
+    }
+  }
+  best
+}
+
 
 # Converts from dna to binDNA format
 reformatDNA <- function(dna) {
@@ -429,7 +493,7 @@ reformatDNA <- function(dna) {
 cdhit1 <- function(sequences, threshold) {
   fname <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse=""))
   wfasta(sequences[,1:2],fname)
-  system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
+  system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
   hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
   hitcl[,tic:=substr(V2,1,1)]
   hitcl[,clus:=rleid(tic)]
@@ -447,7 +511,7 @@ cdhit2 <- function(sequences, threshold) {
   fname <- paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",tseqs[1]$name), collapse="")
   tseqs[,seq:=substr(seq,100,nchar(seq)-100)]
   wfasta(tseqs[,1:2],fname)
-  system(paste0("cd-hit-est -G 0 -A 40 -n 8 -g 1 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", opt$identity, " -o cl",fname, collapse = ""), ignore.stdout = T)
+  system(paste0("cd-hit-est -G 0 -A 40 -n 8 -g 1 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
   hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
   hitcl[,tic:=substr(V2,1,1)]
   hitcl[,clus:=rleid(tic)]
@@ -513,11 +577,18 @@ init_pantera <- function() {
     end_pantera("ONEview not found")
   }
   
-  if (!file.exists(file.path(this.dir(), "model/typesnames"))) {
-    end_pantera("Model not found.")
+  for (f in c("model/typesnames", "model/featurenames", "model/xgbmodel.ubj",
+              "libs/RepeatPeps.lib", "libs/RepeatPeps.lib.psq")) {
+    if (!file.exists(file.path(pantera_home, f))) {
+      end_pantera(paste("Required file not found:", file.path(pantera_home, f)))
+    }
+  }
+  # A Git LFS pointer instead of the real model is a few hundred bytes
+  if (file.size(file.path(pantera_home, "model/xgbmodel.ubj")) < 1e6) {
+    end_pantera("model/xgbmodel.ubj is not a valid model (Git LFS pointer?)")
   }
   
-  lx(paste("panteraGA path:", this.path()))
+  lx(paste("panteraGA path:", pantera_script))
   lx(paste("Genomes list file:", opt$genomes))
   lx(paste("Output folder:", opt$output_folder))
   lx(paste("Threads to use:", opt$threads))
@@ -527,9 +598,13 @@ init_pantera <- function() {
   lx(paste("Identity for clustering:", opt$identity))
   lx(paste("Identity for clustering 2:", opt$identity2))
   lx(paste("Min. sequences to create a consensus:", opt$min_cl))
+  lx(paste("Max fraction of Ns in consensi:", opt$cons_Ns))
   lx(paste("Max percentage of Ns:", opt$Ns))
   lx(paste("Max. size of cluster:", opt$cl_size))
   lx(paste("Minimum size of flanking sequences:", opt$flanking))
+  lx(paste("Flank quantile discarded:", opt$flank_quantile))
+  lx(paste("Keep alignments:", opt$keep))
+  lx(paste("Debug (keep intermediates):", opt$debug))
   
   return(0)
 }
@@ -551,13 +626,13 @@ read_poly <- function(ngen) {
 make_alignments <- function(glist) {
   # Check if file exists
   if (!file.exists(glist)) {
-    end_pantera("File not found: ", glist)
+    end_pantera(paste0("File not found: ", glist))
   }
   genomes <- readLines(glist)
   genomes <<- trimws(genomes[nzchar(trimws(genomes))])
   lgenomes <- length(genomes)
   if (lgenomes<2) {
-    end_pantera("At least two genomes needed in ", glist)
+    end_pantera(paste0("At least two genomes needed in ", glist))
   }
   tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
   
@@ -658,7 +733,7 @@ find_repeats <- function() {
     mc.cores = opt$threads
   )
   
-  lx(paste("Total sequences discarded:", sum(as.numeric(unlist(loop_exit)))))
+ # lx(paste("Total sequences discarded:", sum(as.numeric(unlist(loop_exit)))))
   system(paste0("mv ../all_segments.fa ../pantera_lib_", round - 1, ".fa"))
   system("cat candidates*.fa > ../segments_candidates.fa")
   setwd("..")
@@ -760,7 +835,7 @@ three_orfs <- function(seq) {
 }
 
 
-get_highest_letter <- function(mat, cons_threshold = 0.4) {
+get_highest_letter <- function(mat, cons_threshold = 0.3) {
   priority <- c("A", "C", "G", "T", "-")
   
   apply(mat, 2, function(col) {
@@ -773,7 +848,12 @@ get_highest_letter <- function(mat, cons_threshold = 0.4) {
       max_top <- max(top_four)
       if (max_top >= all_sum* cons_threshold) {
         tied <- rownames(mat)[1:4][top_four == max_top]
-        priority[priority %in% tied][1]
+        # Ties: a transition (A/G or C/T) keeps A or C, the base first in the priority
+        # order; any tie involving a transversion, or more than two bases, becomes N.
+        if (length(tied) == 1) tied
+        else if (setequal(tied, c("A", "G"))) "A"
+        else if (setequal(tied, c("C", "T"))) "C"
+        else "N"
       } else {
         "N"
       }
@@ -828,7 +908,7 @@ cluster_results <- function() {
                                       #      maxiterate = 2,
                                       options = c("--adjustdirection"),
                                       ep = 0.123,
-                                      thread = -1,
+                                      thread = 1,
                                       exec = "mafft"
                     )
                     nseqs <- length(seqs)
@@ -868,7 +948,7 @@ cluster_results <- function() {
                     saturation <- unlist(lapply(dtMatrix[1:4],sum))/nseqs
                     conserv <- unlist(lapply(dtMatrix[1:4],max))/(saturation*nseqs)
                     consstring <- paste0(as.numeric(conserv>=conserv_threshold & saturation >= sat_threshold),collapse = "")
-                    cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),]),collapse="")
+                    cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),], cons_threshold),collapse="")
                     cons_full <- cons   # the full, un-sliced consensus - `cons` gets reassigned to this
                     # at the very end so the unchanged code after this block
                     # still does its own substr(cons, cons_s, cons_e) trim
@@ -882,7 +962,7 @@ cluster_results <- function() {
                                                          ifelse(x <= 20, 3, 2))))))
                     }
                     cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,get_sequence_value(nseqs)),collapse =""))[1]
-                    
+                    if (is.na(cons_s)) next   # no conserved block: skip this cluster, not the whole window
                     ## ---- cons_e: end of the same conserved block cons_s belongs to ----------
                     ## Trivial gaps (<= small_gap columns - ordinary single-base dropouts inside
                     ## an otherwise solid block) always bridge. Larger gaps only bridge if
@@ -921,76 +1001,128 @@ cluster_results <- function() {
                     
                     ## ---- Generic, motif-agnostic per-sequence TSD caller --------------------
                     ## Tests whether each sequence's own left-flank tail matches its own
-                    ## right-flank head, for lengths 2-13, scored against a LOCAL (flank-
-                    ## specific, not whole-alignment) null base-composition model. This needs
-                    ## no assumption about what the TSD looks like: a family-fixed motif
-                    ## (Tc1/Mariner's "TA", PiggyBac's "TTAA"), a partially-degenerate motif
-                    ## (CACTA/hAT-style "GTNAC"-type target sites), and a variable-content but
-                    ## fixed-length target (most hAT elements) all show up the same way here -
-                    ## only the aggregate statistics downstream differ.
-                    estimate_null_match_prob <- function(seqs) {
-                      chars <- unlist(strsplit(paste0(seqs, collapse = ""), ""))
-                      chars <- chars[chars %in% c("A", "C", "G", "T")]
-                      if (length(chars) == 0) return(0.25)
-                      freq <- table(factor(chars, levels = c("A", "C", "G", "T"))) / length(chars)
-                      sum(freq^2)
-                    }
-                    call_tsd_per_sequence <- function(l, r, min_len = 2, max_len = 13, min_identity = 0.8, p0 = 0.25) {
-                      n <- length(l)
-                      out <- vector("list", n)
-                      for (i in seq_len(n)) {
-                        li <- l[i]; ri <- r[i]
-                        max_x <- min(max_len, nchar(li), nchar(ri))
-                        if (is.na(max_x) || max_x < min_len) {
-                          out[[i]] <- data.table(idx = i, tsd_len = NA_integer_, pval = NA_real_, seq = NA_character_)
-                          next
-                        }
-                        best_x <- NA_integer_; best_p <- Inf; best_seq <- NA_character_
-                        for (xx in min_len:max_x) {
-                          l_slice <- stri_reverse(substr(li, 1, xx))
-                          r_slice <- substr(ri, 1, xx)
-                          l_chars <- strsplit(l_slice, "")[[1]]
-                          r_chars <- strsplit(r_slice, "")[[1]]
-                          nmatch <- sum(l_chars == r_chars)
-                          identity <- nmatch / xx
-                          if (identity < min_identity) next
-                          pval <- stats::pbinom(nmatch - 1, size = xx, prob = p0, lower.tail = FALSE)
-                          if (pval < best_p) { best_p <- pval; best_x <- xx; best_seq <- r_slice }
-                        }
-                        out[[i]] <- data.table(idx = i, tsd_len = best_x, pval = signif(best_p, 3), seq = best_seq)
+                    ## right-flank head, for lengths 2-13. This needs no assumption about what
+                    ## the TSD looks like: a family-fixed motif (Tc1/Mariner's "TA", PiggyBac's
+                    ## "TTAA"), a partially-degenerate motif (CACTA/hAT-style "GTNAC"-type target
+                    ## sites), and a variable-content but fixed-length target (most hAT elements)
+                    ## all show up the same way here - only the aggregate statistics downstream
+                    ## differ.
+                    ##
+                    ## Speed: the caller only ever looks at the K = 13 + 6 bases next to an edge
+                    ## (longest TSD plus largest offset), so per edge position we extract just
+                    ## those bases once, as an nseqs x K matrix, cache it, and score all TSD
+                    ## lengths for all sequences with vectorised comparisons. The motif string
+                    ## (the slow Biostrings call) is built only for the final choice.
+                    ##
+                    ## Null match probability p0: the previous code estimated it from the
+                    ## flank base composition, but counted only upper-case bases while the
+                    ## aligned sequences are lower case, so it was always 0.25. That behaviour
+                    ## is kept (use_local_composition = FALSE). Setting it to TRUE uses the real
+                    ## flank composition, computed from the column counts in cMatrix.
+                    tsd_max <- 13L
+                    off_max <- 6L
+                    K <- tsd_max + off_max
+                    use_local_composition <- TRUE
+                    
+                    tail_cache <- new.env()
+                    head_cache <- new.env()
+                    # Last K ungapped bases before column cs, per sequence (left-padded with NA)
+                    left_tail <- function(cs) {
+                      key <- as.character(cs)
+                      v <- tail_cache[[key]]
+                      if (is.null(v)) {
+                        v <- t(vapply(alim, function(s) {
+                          x <- if (cs > 1) strsplit(gsub("-", "", substr(s, 1, cs - 1)), "")[[1]] else character(0)
+                          x <- tail(x, K)
+                          c(rep(NA_character_, K - length(x)), x)
+                        }, character(K), USE.NAMES = FALSE))
+                        assign(key, v, envir = tail_cache)
                       }
-                      rbindlist(out)
+                      v
                     }
-                    summarize_tsd_cluster <- function(calls, edges, sig_threshold = 0.1, min_support = 2) {
-                      sig <- calls[!is.na(tsd_len) & pval <= sig_threshold]
-                      if (nrow(sig) == 0) return(list(modal_len = NA_integer_, modal_conf = 0, modal_motif = ""))
-                      len_dist <- sig[, .N, by = tsd_len][order(-N, -tsd_len)]
-                      modal_len <- len_dist$tsd_len[1]
-                      modal_conf <- round(len_dist$N[1] / nrow(calls), 2)   # fraction of ALL sequences agreeing on
-                      # the SAME length - the key signal for
-                      # "one consistent, real TSD" versus
-                      # several sequences matching by chance
-                      # at unrelated lengths
-                      rows <- sig[tsd_len == modal_len, idx]
-                      l_side <- stri_reverse(substr(edges$l[rows], 1, modal_len))
-                      r_side <- substr(edges$r[rows], 1, modal_len)
-                      modal_motif <- if (length(rows) >= min_support) {
-                        Biostrings::consensusString(Biostrings::DNAStringSet(c(r_side, l_side)),
-                                                    ambiguityMap = Biostrings::IUPAC_CODE_MAP, shift = 0L, width = NULL)
-                      } else ""
-                      list(modal_len = modal_len, modal_conf = modal_conf, modal_motif = modal_motif)
+                    # First K ungapped bases after column ce, per sequence (right-padded with NA)
+                    right_head <- function(ce) {
+                      key <- as.character(ce)
+                      v <- head_cache[[key]]
+                      if (is.null(v)) {
+                        v <- t(vapply(alim, function(s) {
+                          x <- strsplit(gsub("-", "", substr(s, ce + 1, nchar(s))), "")[[1]]
+                          x <- head(x, K)
+                          c(x, rep(NA_character_, K - length(x)))
+                        }, character(K), USE.NAMES = FALSE))
+                        assign(key, v, envir = head_cache)
+                      }
+                      v
                     }
-                    build_edges <- function(cs, ce) {
-                      data.table(l = stri_reverse(gsub("-", "", substr(alim, 1, cs - 1))),
-                                 r = gsub("-", "", substr(alim, ce + 1, nchar(alim[1]))))
+                    cum_acgt <- t(apply(cMatrix[c("A", "C", "G", "T"), , drop = FALSE], 1, cumsum))
+                    p0_for <- function(cs, ce) {
+                      if (!use_local_composition) return(0.25)
+                      cnt <- (if (cs > 1) cum_acgt[, cs - 1] else 0) + cum_acgt[, ncol(cum_acgt)] - cum_acgt[, ce]
+                      if (sum(cnt) == 0) return(0.25)
+                      sum((cnt / sum(cnt))^2)
+                    }
+                    # Per-sequence best TSD: for each length 2..13, compare the last x bases of the
+                    # left flank with the first x bases of the right flank (after skipping offl/offr
+                    # bases next to the edges), keep lengths with >= 80% identity, and take the
+                    # length with the smallest binomial p-value (first one on ties).
+                    call_tsd_fast <- function(Lt, Rh, offl = 0L, offr = 0L, p0 = 0.25,
+                                              min_len = 2L, min_identity = 0.8) {
+                      n <- nrow(Lt)
+                      max_x <- pmin(tsd_max, rowSums(!is.na(Lt)) - offl, rowSums(!is.na(Rh)) - offr)
+                      best_p <- rep(Inf, n)
+                      best_x <- rep(NA_integer_, n)
+                      for (xx in min_len:tsd_max) {
+                        ok <- max_x >= xx
+                        if (!any(ok)) break
+                        nm <- rowSums(Lt[, (K - offl - xx + 1):(K - offl), drop = FALSE] ==
+                                        Rh[, (offr + 1):(offr + xx), drop = FALSE], na.rm = TRUE)
+                        pv <- stats::pbinom(nm - 1, size = xx, prob = p0, lower.tail = FALSE)
+                        upd <- ok & (nm / xx >= min_identity) & (pv < best_p)
+                        best_p[upd] <- pv[upd]
+                        best_x[upd] <- xx
+                      }
+                      list(tsd_len = best_x, pval = signif(best_p, 3))
+                    }
+                    # Most frequent significant TSD length (longest one on ties), the fraction of ALL
+                    # sequences that agree on it, and which sequences those are.
+                    summarize_tsd <- function(calls, sig_threshold = 0.1) {
+                      sig <- which(!is.na(calls$tsd_len) & calls$pval <= sig_threshold)
+                      if (length(sig) == 0) return(list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0)))
+                      counts <- tabulate(calls$tsd_len[sig], nbins = tsd_max)
+                      modal_len <- max(which(counts == max(counts)))
+                      list(modal_len = modal_len,
+                           modal_conf = round(max(counts) / length(calls$tsd_len), 2),
+                           rows = sig[calls$tsd_len[sig] == modal_len])
+                    }
+                    tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = 2) {
+                      k <- summ$modal_len
+                      if (is.na(k) || length(summ$rows) < min_support) return("")
+                      l_side <- apply(Lt[summ$rows, (K - offl - k + 1):(K - offl), drop = FALSE], 1, paste, collapse = "")
+                      r_side <- apply(Rh[summ$rows, (offr + 1):(offr + k), drop = FALSE], 1, paste, collapse = "")
+                      Biostrings::consensusString(Biostrings::DNAStringSet(c(r_side, l_side)),
+                                                  ambiguityMap = Biostrings::IUPAC_CODE_MAP, shift = 0L, width = NULL)
                     }
                     score_candidate <- function(cs, ce) {
-                      edges_try <- build_edges(cs, ce)
-                      local_p0 <- estimate_null_match_prob(c(edges_try$l, edges_try$r))
-                      calls_try <- call_tsd_per_sequence(edges_try$l, edges_try$r, min_len = 2, max_len = 13,
-                                                         min_identity = 0.8, p0 = local_p0)
-                      summ_try <- summarize_tsd_cluster(calls_try, edges_try)
-                      list(score = summ_try$modal_conf, calls = calls_try, summary = summ_try)
+                      p0_try <- p0_for(cs, ce)
+                      calls_try <- call_tsd_fast(left_tail(cs), right_head(ce), p0 = p0_try)
+                      summ_try <- summarize_tsd(calls_try)
+                      list(score = summ_try$modal_conf, calls = calls_try, summary = summ_try, p0 = p0_try)
+                    }
+                    ## ---- Is the agreement between copies more than chance? --------------------
+                    ## A copy "has" a TSD of length L by chance with probability q_L (>= 80% of L
+                    ## positions matching at the null match probability p0): about 1/16 for 2 bp,
+                    ## 1/64 for 3-5 bp, much less for longer ones. The chance that k or more of n
+                    ## copies agree on one length is then binomial. This is a p-value for ONE edge
+                    ## position and ONE length, so it is multiplied by the number of lengths tried
+                    ## and, in the shift search, by the number of edge positions tried. Without
+                    ## that, a 3-copy cluster finds a chance 2 bp "TSD" (2 of 3 copies) somewhere
+                    ## in the ~600 candidates almost every time.
+                    tsd_alpha <- 0.05
+                    tsd_pvalue <- function(summ, p0, n = nseqs, min_identity = 0.8) {
+                      L <- summ$modal_len
+                      if (is.na(L)) return(1)
+                      q <- stats::pbinom(ceiling(min_identity * L - 1e-9) - 1, L, p0, lower.tail = FALSE)
+                      stats::pbinom(length(summ$rows) - 1, n, q, lower.tail = FALSE)
                     }
                     
                     ## ---- Boundary-shift search: is the raw edge actually right? -------------
@@ -1013,7 +1145,8 @@ cluster_results <- function() {
                     min_core <- 20   # never shrink the core below this many columns
                     baseline <- score_candidate(cons_s_raw, cons_e_raw)
                     all_results <- list(`0_0` = list(ds = 0, de = 0, cons_s = cons_s_raw, cons_e = cons_e_raw,
-                                                     score = baseline$score, calls = baseline$calls, summary = baseline$summary))
+                                                     score = baseline$score, calls = baseline$calls, summary = baseline$summary,
+                                                     p0 = baseline$p0))
                     for (ds in shift_range) {
                       cs <- cons_s_raw + ds
                       if (cs < 1) next
@@ -1023,13 +1156,35 @@ cluster_results <- function() {
                         if (ds == 0 && de == 0) next
                         cand <- score_candidate(cs, ce)
                         all_results[[paste(ds, de, sep = "_")]] <- list(ds = ds, de = de, cons_s = cs, cons_e = ce,
-                                                                        score = cand$score, calls = cand$calls, summary = cand$summary)
+                                                                        score = cand$score, calls = cand$calls, summary = cand$summary,
+                                                                        p0 = cand$p0)
                       }
                     }
                     
                     adequate_support <- 0.65   # at least ~2/3 of sequences must independently agree on one TSD
                     # length before a shift is trusted at all
-                    eligible <- Filter(function(r) r$score >= adequate_support, all_results)
+                    
+                    ## An inward shift turns element columns into flank. A TSD pulled into the raw
+                    ## edge can only account for as many columns as the TSD itself is long, so reject
+                    ## candidates that trim more than that on either side. Without this, the
+                    ## self-complementary core of a TIR (e.g. ...GC|...|GC... inside GGGGGC...GCCCCC)
+                    ## is shared by every copy and scores as a perfect, but false, 2 bp "TSD".
+                    inward_ok <- function(r) {
+                      k <- r$summary$modal_len
+                      !is.na(k) && max(r$ds, 0) <= k && max(-r$de, 0) <= k
+                    }
+                    ## The raw edges come from conservation alone, before any TSD is looked at, so
+                    ## a TSD there is one test (corrected only for the lengths tried). A TSD found
+                    ## by moving the edges is corrected for every edge position tried. Using the
+                    ## full correction at the raw edges too would reject a real 5 bp TSD in a small
+                    ## cluster and accept the exact 4 bp match that a 1 bp shift always produces
+                    ## from it (4 of its 5 bases), growing the element by 1 bp.
+                    n_tests <- length(all_results) * (tsd_max - 1L)     # edge positions x TSD lengths
+                    significant <- function(r) {
+                      m <- if (r$ds == 0 && r$de == 0) tsd_max - 1L else n_tests
+                      tsd_pvalue(r$summary, r$p0) * m <= tsd_alpha
+                    }
+                    eligible <- Filter(function(r) r$score >= adequate_support && inward_ok(r) && significant(r), all_results)
                     best <- if (length(eligible) == 0) {
                       all_results[["0_0"]]
                     } else {
@@ -1058,7 +1213,7 @@ cluster_results <- function() {
                     for (dir in directions) {
                       step1_ds <- best$ds + dir[1]; step1_de <- best$de + dir[2]
                       step1 <- all_results[[paste(step1_ds, step1_de, sep = "_")]]
-                      if (is.null(step1) || step1$score < adequate_support) next
+                      if (is.null(step1) || step1$score < adequate_support || !inward_ok(step1) || !significant(step1)) next
                       step2_ds <- best$ds + 2 * dir[1]; step2_de <- best$de + 2 * dir[2]
                       step2_cs <- cons_s_raw + step2_ds; step2_ce <- cons_e_raw + step2_de
                       step2 <- if (step2_cs >= 1 && step2_ce <= nchar(cons_full) && step2_ce - step2_cs >= min_core) {
@@ -1077,7 +1232,11 @@ cluster_results <- function() {
                     cons_e <- best$cons_e
                     tsd_calls <- best$calls
                     tsd_summary <- best$summary
-                    edges <- build_edges(cons_s, cons_e)
+                    Lt <- left_tail(cons_s)
+                    Rh <- right_head(cons_e)
+                    motif_offl <- 0L
+                    motif_offr <- 0L
+                    summary_p0 <- best$p0
                     
                     ## ---- Offset-aware refinement (variable-content, fixed-length TSDs) ------
                     ## The search above only ever tests matches flush against cons_s/cons_e.
@@ -1099,22 +1258,18 @@ cluster_results <- function() {
                     ## boundary search applies here too).
                     strict_pval <- 0.01
                     min_strict_count <- 6
+                    p0_final <- p0_for(cons_s, cons_e)
                     offset_candidates <- list()
-                    for (offl in 0:6) {
-                      for (offr in 0:6) {
-                        l_shifted <- substr(edges$l, offl + 1, nchar(edges$l))
-                        r_shifted <- substr(edges$r, offr + 1, nchar(edges$r))
-                        p0_off <- estimate_null_match_prob(c(l_shifted, r_shifted))
-                        calls_off <- call_tsd_per_sequence(l_shifted, r_shifted, min_len = 2, max_len = 13,
-                                                           min_identity = 0.8, p0 = p0_off)
-                        strict <- calls_off[!is.na(tsd_len) & pval <= strict_pval]
-                        if (nrow(strict) == 0) next
-                        len_dist_off <- strict[, .N, by = tsd_len][order(-N)]
-                        cnt <- len_dist_off$N[1]
+                    for (offl in 0:off_max) {
+                      for (offr in 0:off_max) {
+                        calls_off <- call_tsd_fast(Lt, Rh, offl, offr, p0 = p0_final)
+                        strict <- which(!is.na(calls_off$tsd_len) & calls_off$pval <= strict_pval)
+                        if (length(strict) == 0) next
+                        cnt <- max(tabulate(calls_off$tsd_len[strict], nbins = tsd_max))
                         if (cnt >= min_strict_count) {
                           offset_candidates[[paste(offl, offr, sep = "_")]] <- list(
                             offl = offl, offr = offr, count = cnt, calls = calls_off,
-                            summary = summarize_tsd_cluster(calls_off, data.table(l = l_shifted, r = r_shifted))
+                            summary = summarize_tsd(calls_off)
                           )
                         }
                       }
@@ -1125,9 +1280,19 @@ cluster_results <- function() {
                       if (best_offset$count > baseline_strict_count) {
                         tsd_calls <- best_offset$calls
                         tsd_summary <- best_offset$summary
+                        motif_offl <- best_offset$offl
+                        motif_offr <- best_offset$offr
+                        summary_p0 <- p0_final
                       }
                     }
-                    
+                    ## Report a TSD only if the agreement at the final edges is more than chance
+                    ## (one edge position, so corrected only for the number of lengths tried).
+                    ## Otherwise it would still feed the TSD-based reclassification rules.
+                    if (tsd_pvalue(tsd_summary, summary_p0) * (tsd_max - 1L) > tsd_alpha) {
+                      tsd_summary <- list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0))
+                    }
+                    tsd_summary$modal_motif <- tsd_motif(tsd_summary, Lt, Rh, motif_offl, motif_offr)
+                                   
                     tsd_len    <- tsd_summary$modal_len
                     tsds_conf  <- tsd_summary$modal_conf
                     tsds_motif <- tsd_summary$modal_motif
@@ -1189,7 +1354,7 @@ cluster_results <- function() {
   
   zones_interval <- 300
   zones_interval_overlap <- 0
-  cons_threshold <- 0.4
+  cons_threshold <- 0.3
   conserv_threshold <- 0.8
   sat_threshold <- 0.4
   opt$cl_size <- 1000
@@ -1203,7 +1368,7 @@ cluster_results <- function() {
     lx(paste("Starting loop 2"))
     lx(paste("Processing:", nrow(segments_unique), "segments"))
     lx(paste("Largest segment:", max(segments_unique$len)))
-    lx(paste("Smallest segment:", min(segments_unique$len)))
+    lx(paste("Smallest segment:", min(segments_unique$len)-200))
     dir.create("loop_2", showWarnings = FALSE)
     dir.create("alignments", showWarnings = FALSE)
     setwd("loop_2")
@@ -1237,46 +1402,48 @@ cluster_results <- function() {
 }
 
 # Classify TE models
+
+
 classify_tes <- function() {
   final <- ffasta("all_consensi.fa")
   final <- final[!duplicated(final$seq)]
   final <- final[order(-nchar(seq))]
-  ### Parse information in final to include later
-  cluster_n <- as.numeric(gsub("_tsdl.*","",gsub(".*_clus","", final$name)))
-  tsd_l <- as.numeric(gsub("_tsdc.*","",gsub(".*_tsdl","", final$name)))
-  tsd_c <- as.numeric(gsub("_tsdm.*","",gsub(".*_tsdc","", final$name)))
-  tsd_m <- gsub("_gens.*","",gsub(".*_tsdm","", final$name))
-  gencount <- gsub("@@.*","",gsub(".*_gens","", final$name))
-  oldnames <<- final$name
-  # write(oldnames, "oldnames")
-  final[, name := paste0(">", opt$lib_name, "_", 1:nrow(final), 
-                         "-", gsub(".*-","",name))]
-  wfasta(final, paste0(opt$lib_name, "-consensi.fa"))
-  lx(paste("Final consensi: ", nrow(final)))
+  final[, `:=`(
+    cluster  = as.numeric(gsub("_tsdl.*", "", gsub(".*_clus", "", name))),
+    tsd_l    = as.numeric(gsub("_tsdc.*", "", gsub(".*_tsdl", "", name))),
+    tsd_c    = as.numeric(gsub("_tsdm.*", "", gsub(".*_tsdc", "", name))),
+    tsd_m    = gsub("_gens.*", "", gsub(".*_tsdm", "", name)),
+    gencount = gsub("@@.*", "", gsub(".*_gens", "", name)),
+    aln_file = paste0(substr(make.names(name), 1, 36), ".maf")
+  )]
+  final[, name := paste0(">", opt$lib_name, "_", .I)]
   file <- paste0(opt$lib_name, "-consensi.fa")
+  wfasta(final[, c("name", "seq")], file)
+  lx(paste("Final consensi: ", nrow(final)))
   lx("Reading orfs")
   system(
     paste0(
       "getorf -sequence ",
       file,
-      " --outseq temp.orfs -minsize 100 &>/dev/null; blastp -num_threads ",detectCores()," -query temp.orfs -db ",
-      scriptPath,
+      " --outseq temp.orfs -minsize 100 >/dev/null 2>&1; blastp -num_threads ", opt$threads, " -query temp.orfs -db ",
+      pantera_home,
       "/libs/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
     )
   )
   lx("Reading data")
   orfs <- fread("orfs.tbl", header = F)
+  result <- data.table()
   if (nrow(orfs) > 0) {
     types <-
-      read.table(file.path(this.dir(), "model/typesnames"),
+      read.table(file.path(pantera_home, "model/typesnames"),
                  sep = "\n")
     types <- types$V1
     features <-
-      read.table(file.path(this.dir(), "model/featurenames"),
+      read.table(file.path(pantera_home, "model/featurenames"),
                  sep = "\n")
     features <- features$V1
     xgb.fit <-
-      xgb.load(file.path(this.dir(), "model/xgbmodel.ubj"))
+      xgb.load(file.path(pantera_home, "model/xgbmodel.ubj"))
     lx("Processing")
     orfs[, V1 := gsub("_[0-9]*$", "", V1)]
     orfs[, prot := gsub(".*#", "", V2)]
@@ -1313,240 +1480,305 @@ classify_tes <- function() {
     
     result <-
       data.table(
-        Name = names,
+        name = paste0(">", names),
         Prediction = xgb.pred2$prediction,
         Probability = xgb.pred2$prob
       )
-    result <- result[, name := paste0(">", Name)]
   }
-  
   
   lx("Merge")
-  tes <- ffasta(file)
   if (nrow(result) > 0) {
-    final <- merge(tes, result, all.x = T)
-    final[is.na(Prediction), Prediction := "Unknown"]
+    final <- merge(final, result, by = "name", all.x = TRUE, sort = FALSE)
   } else {
-    final <- tes
-    final[,Prediction := "Unknown"]
+    final[, `:=`(Prediction = NA_character_, Probability = NA_real_)]
   }
-  final[, short_Prediction:=  gsub(".*/","",Prediction)]
-  final[,ix:=1:.N, by = short_Prediction]
-  final <- final[order(-nchar(seq))] 
-  final[,tsd_l:=tsd_l]
-  final[,tsd_c:=tsd_c]
-  final[,tsd_m:=tsd_m]
-  final[,cluster:=cluster_n]
-  final[,gencount:=gencount]
-  final[, name := paste0(">",short_Prediction,"_",ix,"-",opt$lib_name, 
-                         "#", Prediction), by=1:nrow(final)]
-  final[Probability < 0.4, name := paste0(gsub("#.*","",name), "#Unknown", collapse = ""), by=.I]
-  final <- final[!duplicated(final$seq)]
+  # Keep the classifier's own call for curators, whatever its probability
+  final[, `:=`(hom_class = fifelse(is.na(Prediction), "none", Prediction),
+               hom_prob  = fifelse(is.na(Probability), 0, round(Probability, 3)))]
+  final[is.na(Prediction) | is.na(Probability) | Probability < 0.4, Prediction := "Unknown"]
+  final <- final[order(-nchar(seq))]
+  # Working name: unique id + class. Final names are set at the end of stats_tes().
+  final[, name := paste0(name, "#", Prediction)]
   fwrite(final, paste0(file, ".statspre"), sep = "\t")
-  return(final[, c("name", "seq", "cluster", "tsd_l","tsd_c","tsd_m","gencount")])
-  
+  return(final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "gencount", "aln_file",
+                   "hom_class", "hom_prob")])
 }
 
+
 # Obtain structural stats from TE models and recover or filter some.
+
+
 stats_tes <- function() {
   lx("Stats start")
-  tes <- final[, c("name", "seq", "cluster", "tsd_l","tsd_c","tsd_m","gencount")]
+  tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "gencount", "aln_file",
+                   "hom_class", "hom_prob")]
   file <- paste0(opt$lib_name, "-consensi.fa")
-  # Rename alignments
-  lapply(1:length(oldnames), function(x) {file.rename(paste0("alignments/",substr(make.names(oldnames[x]),1,36),".maf"),
-                                                      paste0("alignments/",make.names(gsub(">","",tes$name[x])),".maf"))})
   
-  temp <- paste0("temp",make.names(gsub(".*/","",file)))
+  temp <- paste0("temp", make.names(gsub(".*/", "", file)))
   dir.create(temp)
   setwd(temp)
   lente <- nchar(tes$seq)
   tes$lente <- lente
-  orfs_tes <- rbindlist(mclapply(tes$seq,three_orfs))
-  tes <- cbind(tes,orfs_tes)
-  lx(paste("Flipping", nrow(tes[strand=="-"]), "sequences"))
-  tes[strand=="-",seq:=rc(seq)]
+  orfs_tes <- rbindlist(mclapply(tes$seq, three_orfs, mc.cores = opt$threads))
+  tes <- cbind(tes, orfs_tes)
+  lx(paste("Flipping", nrow(tes[strand == "-"]), "sequences"))
+  tes[, flipped := strand == "-"]
+  tes[strand == "-", seq := rc(seq)]
   tes$strand <- NULL
-  wfasta(tes[, c("name","seq")], paste0("tmp-tes"))
+  
+  ## 3' tails: polyA or a short tandem repeat (see detect_tail). Checked at both ends:
+  ## elements are oriented by their longest ORF, so for LINEs the 3' end is the right
+  ## end, but SINEs have no ORF and can end up either way round.
+  t3 <- rbindlist(lapply(tes$seq, detect_tail))
+  t5 <- rbindlist(lapply(tes$seq, function(s) detect_tail(rc(s))))
+  tes[, `:=`(tail3_motif = t3$tail_motif, tail3_len = t3$tail_len,
+             tail5_motif = t5$tail_motif, tail5_len = t5$tail_len)]
+  wfasta(tes[, c("name", "seq")], paste0("tmp-tes"))
   system(paste0("makeblastdb -in tmp-tes -dbtype nucl 1> /dev/null"))
-  te_data <- fread(cmd= paste0("blastn -query tmp-tes -db tmp-tes -task blastn -num_threads ", 
-                               detectCores(), 
-                               " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"), header = F)
+  te_data <- fread(cmd = paste0("blastn -query tmp-tes -db tmp-tes -task blastn -num_threads ",
+                                opt$threads,
+                                " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"), header = F)
   if (nrow(te_data) > 0) {
-    colnames(te_data) <-c("qseqid","sseqid", "pident" , "length","mismatch", 
-                          "gapopen","qstart","qend","sstart","send", 
-                          "evalue", "bitscore")
+    colnames(te_data) <- c("qseqid", "sseqid", "pident", "length", "mismatch",
+                           "gapopen", "qstart", "qend", "sstart", "send",
+                           "evalue", "bitscore")
     te_data_mix <- te_data[qseqid != sseqid] # Non self matches, to deal with later
-    te_data_rep <- te_data[qseqid == sseqid & length >20 & 
-                             (qstart != sstart | qend != send)][,.(N=.N,maxRep=max(length)),qseqid] # large self matches that are not trivial. To filter with MaxRep.
-    te_data  <- te_data[!(qseqid == sseqid & qstart == sstart & qend == send)] # Self matches that are not the whole element, to check for TIR and LTR
+    te_data_rep <- te_data[qseqid == sseqid & length > 20 &
+                             (qstart != sstart | qend != send)][, .(N = .N, maxRep = max(length)), qseqid] # large self matches that are not trivial. To filter with MaxRep.
+    te_data <- te_data[!(qseqid == sseqid & qstart == sstart & qend == send)] # Self matches that are not the whole element, to check for TIR and LTR
     ### TIR, LTR detection
     te_data <- te_data[qseqid == sseqid]
-    te_data[,len:=abs(qend-qstart)]
+    te_data[, len := abs(qend - qstart)]
     te_data <- te_data[order(qstart)][order(-len)]
-    te_data <- merge(te_data, 
-                     tes[,c("name","lente", "orf1", "orf2", "orf3")]
-                     [,name:=gsub(">","",name)], by.x = "qseqid", by.y="name")
-    te_data[,lgap:=.(min(qstart,qend,sstart,send)-1), by=1:nrow(te_data)]
-    te_data[,rgap:=.(lente-max(qstart,qend,sstart,send)), by=1:nrow(te_data)]
+    te_data <- merge(te_data,
+                     tes[, c("name", "lente", "orf1", "orf2", "orf3")]
+                     [, name := gsub(">", "", name)], by.x = "qseqid", by.y = "name")
+    te_data[, lgap := .(min(qstart, qend, sstart, send) - 1), by = 1:nrow(te_data)]
+    te_data[, rgap := .(lente - max(qstart, qend, sstart, send)), by = 1:nrow(te_data)]
     
-    te_data[,check:=((qend+qstart-lente)/2) * ((send+sstart-lente)/2)<0, 
-            by=1:nrow(te_data)]  ### Is each match at one side of the center?
-    te_data <- te_data[check==T]
-    te_data[,check_type:=((qend-qstart)*(send-sstart))<0, by=1:nrow(te_data)]
-    te_data[,tgap :=lgap+rgap]
-    te_data <- te_data[order(tgap)][,.SD[1],qseqid]
+    te_data[, check := ((qend + qstart - lente) / 2) * ((send + sstart - lente) / 2) < 0,
+            by = 1:nrow(te_data)]  ### Is each match at one side of the center?
+    te_data <- te_data[check == T]
+    te_data[, check_type := ((qend - qstart) * (send - sstart)) < 0, by = 1:nrow(te_data)]
+    te_data[, tgap := lgap + rgap]
+    te_data <- te_data[order(tgap)][, .SD[1], qseqid]
     te_data$type <- "LTR"
-    te_data[check_type==T,type:= "TIR"]
+    te_data[check_type == T, type := "TIR"]
     ### TIR, LTR detection END
     
     # Mark as PASS LTR and TIR elements matching their class.
-    good_ltr <- te_data[grepl("#LTR",qseqid) & type == "LTR" & lgap < 8 & rgap < 8 & length > 100]$qseqid
-    good_tir <- te_data[grepl("#DNA",qseqid) & type == "TIR" & lgap < 8 & rgap < 8]$qseqid
+    good_ltr <- te_data[grepl("#LTR", qseqid) & type == "LTR" & lgap < 8 & rgap < 8 & length > 100]$qseqid
+    good_tir <- te_data[grepl("#DNA", qseqid) & type == "TIR" & lgap < 8 & rgap < 8]$qseqid
     
-    tes <- merge(tes[,name:=gsub(">","",name)], 
-                 te_data[,c("qseqid","length","lgap","rgap", "type")], 
-                 by.x = "name", by.y = "qseqid", all.x=T)
-    tes[is.na(type), rgap :=0]
-    tes[is.na(type), lgap :=0]
-    tes[is.na(type), length :=0]
+    tes <- merge(tes[, name := gsub(">", "", name)],
+                 te_data[, c("qseqid", "length", "lgap", "rgap", "type")],
+                 by.x = "name", by.y = "qseqid", all.x = T)
+    tes[is.na(type), rgap := 0]
+    tes[is.na(type), lgap := 0]
+    tes[is.na(type), length := 0]
     
-    tes <- merge(tes,te_data_rep, by.x = "name", by.y = "qseqid", all.x=T)
+    tes <- merge(tes, te_data_rep, by.x = "name", by.y = "qseqid", all.x = T)
     tes_count <- nrow(tes)
     
-    tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq,paste0(strrep("A",opt$pas),"|",strrep("T",opt$pas))),function(x) {min(unlist(x))-1}))
-    tes$eas <- nchar(tes$seq)-unlist(lapply(stri_locate_all_regex(tes$seq,paste0(strrep("A",opt$pas),"|",strrep("T",opt$pas))),function(x) {max(unlist(x))}))
-    tes[,pa:=min(pas,eas), by=.I]
-    tes[substr(seq,1,5)=="AAAAA" | substr(seq,1,5)=="TTTTT" | substr(seq,lente-4,lente)=="AAAAA" | substr(seq,lente-4,lente)=="TTTTT" ,pa:=0, by = .I]
+    tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$pAs), "|", strrep("T", opt$pAs))), function(x) {min(unlist(x)) - 1}))
+    tes$eas <- nchar(tes$seq) - unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$pAs), "|", strrep("T", opt$pAs))), function(x) {max(unlist(x))}))
+    tes[, pa := min(pas, eas), by = .I]
+    tes[substr(seq, 1, 5) == "AAAAA" | substr(seq, 1, 5) == "TTTTT" | substr(seq, lente - 4, lente) == "AAAAA" | substr(seq, lente - 4, lente) == "TTTTT", pa := 0, by = .I]
     
-    good_line <- tes[grepl("LINE",name) & orf1 > 1600 & (pa < 10 | is.na(type) | (lgap >10 & rgap > 10)) ]$name
+    good_line <- tes[grepl("LINE", name) & orf1 > 1600 &
+                       (pa < 10 | tail3_len > 0 | is.na(type) | (lgap > 10 & rgap > 10))]$name
     
     # Find elements which share TIR or LTR to good ones.
     te_data_mix <- merge(te_data_mix,
-                         tes[,c("name","lente", "orf1", "orf2", "orf3","cluster")]
-                         [,name:=gsub(">","",name)], by.x = "qseqid",
-                         by.y="name")
+                         tes[, c("name", "lente", "orf1", "orf2", "orf3", "cluster")]
+                         [, name := gsub(">", "", name)], by.x = "qseqid",
+                         by.y = "name")
     te_data_mix <- merge(te_data_mix,
-                         tes[,c("name","lente", "orf1", "orf2", "orf3","cluster")]
-                         [,name:=gsub(">","",name)], by.x = "sseqid",
-                         by.y="name")
-    te_data_mix[,lqgap:=.(min(qstart,qend)-1), by=.I]
-    te_data_mix[,rqgap:=.(lente.x-max(qstart,qend)), by=.I]
-    te_data_mix[,lsgap:=.(min(sstart,send)-1), by=.I]
-    te_data_mix[,rsgap:=.(lente.y-max(sstart,send)), by=.I]
+                         tes[, c("name", "lente", "orf1", "orf2", "orf3", "cluster")]
+                         [, name := gsub(">", "", name)], by.x = "sseqid",
+                         by.y = "name")
+    te_data_mix[, lqgap := .(min(qstart, qend) - 1), by = .I]
+    te_data_mix[, rqgap := .(lente.x - max(qstart, qend)), by = .I]
+    te_data_mix[, lsgap := .(min(sstart, send) - 1), by = .I]
+    te_data_mix[, rsgap := .(lente.y - max(sstart, send)), by = .I]
     ## Remove dups
-    te_data_mix[,cover:=length/min(lente.x,lente.y), by=.I]
-    te_data_dups <- te_data_mix[cover>0.98 & pident>98 & abs((lente.y-lente.x) / max(lente.y,lente.x))<0.01 ]
-    te_data_dups[,uname:=paste0(c(qseqid,sseqid)[order(c(qseqid,sseqid))], collapse = ""), .I]
-    te_data_dups <- te_data_dups[order(cluster.x-cluster.y)]
+    te_data_mix[, cover := length / min(lente.x, lente.y), by = .I]
+    te_data_dups <- te_data_mix[cover > 0.98 & pident > 98 & abs((lente.y - lente.x) / max(lente.y, lente.x)) < 0.01]
+    te_data_dups[, uname := paste0(c(qseqid, sseqid)[order(c(qseqid, sseqid))], collapse = ""), .I]
+    te_data_dups <- te_data_dups[order(cluster.x - cluster.y)]
     dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
     te_data_mix <- te_data_mix[!(qseqid %in% dups_list)]
     te_data_mix <- te_data_mix[!(sseqid %in% dups_list)]
     
+    ## 3'-anchored relatives: shorter elements that match the 3' end of a longer one, as
+    ## 5'-truncated LINE copies do. Elements are oriented by their longest ORF, so the 3'
+    ## end of the longer (container) element is its right end; the shorter one can be in
+    ## either orientation, since its own longest ORF may be on the other strand. The
+    ## container gets the number of such relatives, each relative the container's id.
+    anch <- te_data_mix[lente.x < lente.y & length / lente.x >= 0.9 & pident >= 90 &
+                          pmax(sstart, send) >= lente.y - 30]
+    tes[, `:=`(tr3_relatives = 0L, fragment_of = NA_character_)]
+    if (nrow(anch) > 0) {
+      rel <- anch[, .(n = uniqueN(qseqid)), by = sseqid]
+      tes[rel, on = .(name = sseqid), tr3_relatives := i.n]
+      frag <- anch[order(-lente.y)][, .SD[1], by = qseqid][, .(qseqid, container = gsub("#.*", "", sseqid))]
+      tes[frag, on = .(name = qseqid), fragment_of := i.container]
+    }
+    lx(paste("Elements with 3'-anchored shorter relatives:", sum(tes$tr3_relatives > 0),
+             "; elements that are 3' fragments of a longer one:", sum(!is.na(tes$fragment_of))))
+    # A LINE whose 3' end is shared by truncated copies is supported even without a tail
+    good_line <- union(good_line, tes[grepl("LINE", name) & orf1 > 1600 & tr3_relatives > 0]$name)
+    
     ## Generate list of LINEs that are subsequence of a better one
-    te_data_mix_line <- te_data_mix[(grepl("LINE",qseqid) | grepl("LINE",sseqid)) & pident> 98 & cover > 0.98]
-    te_data_mix_line[,large:=qseqid]
-    te_data_mix_line[lente.y>lente.x,large:=sseqid]
+    te_data_mix_line <- te_data_mix[(grepl("LINE", qseqid) | grepl("LINE", sseqid)) & pident > 98 & cover > 0.98]
+    te_data_mix_line[, large := qseqid]
+    te_data_mix_line[lente.y > lente.x, large := sseqid]
     
     small_line <- c()
     for (l in tes[name %in% good_line][order(-lente)]$name) {
-      matches <- unique(c(te_data_mix_line[large==l]$qseqid,te_data_mix_line[large==l]$sseqid))
-      matches <- matches[matches!=l]
-      small_line <- c(small_line,matches)
+      matches <- unique(c(te_data_mix_line[large == l]$qseqid, te_data_mix_line[large == l]$sseqid))
+      matches <- matches[matches != l]
+      small_line <- c(small_line, matches)
       te_data_mix_line <- te_data_mix_line[!(qseqid %in% matches | sseqid %in% matches)]
     }
     
     ### Find TIR elements that can be reclassified
-    te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) & lsgap < 8 & rsgap < 8 & lqgap < 8 & rqgap <8 ]
-    tir_reco1 <- te_data_mix_tir[!grepl("DNA",qseqid) & grepl("DNA",sseqid)]
-    tir_reco2 <- te_data_mix_tir[!grepl("DNA",sseqid) & grepl("DNA",qseqid)]
-    tir_reco <- data.table(name=c(tir_reco1$qseqid,tir_reco2$sseqid), sf=gsub(".*#","",c(tir_reco1$sseqid,tir_reco2$qseqid)))
-    tir_reco <- tir_reco[!duplicated(tir_reco)]
+    te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) & lsgap < 8 & rsgap < 8 & lqgap < 8 & rqgap < 8]
+    tir_reco1 <- te_data_mix_tir[!grepl("DNA", qseqid) & grepl("DNA", sseqid)]
+    tir_reco2 <- te_data_mix_tir[!grepl("DNA", sseqid) & grepl("DNA", qseqid)]
+    tir_reco <- data.table(name = c(tir_reco1$qseqid, tir_reco2$sseqid), sf = gsub(".*#", "", c(tir_reco1$sseqid, tir_reco2$qseqid)))
+    tir_reco <- tir_reco[!duplicated(name)]          # one new class per element
     lx(paste("Unknown elements reclassified as DNA:", nrow(tir_reco)))
-    tir_reco[,new := paste0(gsub("#.*","",name),"#",sf,collapse=""), by=.I]
-    tir_merge <- merge(tes[,1],tir_reco,all.x=T)
-    tir_merge[!is.na(new),name:=new]
-    tes$name <- tir_merge$name
+    tir_reco[, new := paste0(gsub("#.*", "", name), "#", sf)]
+    tes[tir_reco, on = "name", name := i.new]
     
     ### Find LTR elements that can be reclassified
-    te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) & ((lsgap < 8  & rsgap < 8) | (lqgap < 8 & rqgap <8)) ]
-    ltr_reco1 <- te_data_mix_tir[!grepl("LTR",qseqid) & grepl("LTR",sseqid)]
-    ltr_reco2 <- te_data_mix_tir[!grepl("LTR",sseqid) & grepl("LTR",qseqid)]
-    ltr_reco <- data.table(name=c(ltr_reco1$qseqid,ltr_reco2$sseqid), sf=gsub(".*#","",c(ltr_reco1$sseqid,ltr_reco2$qseqid)))
-    ltr_reco <- ltr_reco[!duplicated(ltr_reco)]
+    te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) & ((lsgap < 8 & rsgap < 8) | (lqgap < 8 & rqgap < 8))]
+    ltr_reco1 <- te_data_mix_ltr[!grepl("LTR", qseqid) & grepl("LTR", sseqid)]
+    ltr_reco2 <- te_data_mix_ltr[!grepl("LTR", sseqid) & grepl("LTR", qseqid)]
+    ltr_reco <- data.table(name = c(ltr_reco1$qseqid, ltr_reco2$sseqid), sf = gsub(".*#", "", c(ltr_reco1$sseqid, ltr_reco2$qseqid)))
+    ltr_reco <- ltr_reco[!duplicated(name)]          # one new class per element
     lx(paste("Unknown elements reclassified as LTR:", nrow(ltr_reco)))
-    ltr_reco[,new := paste0(gsub("#.*","",name),"#",sf,collapse=""), by=.I]
-    ltr_merge <- merge(tes[,1],ltr_reco,all.x=T)
-    ltr_merge[!is.na(new),name:=new]
-    tes$name <- ltr_merge$name
+    ltr_reco[, new := paste0(gsub("#.*", "", name), "#", sf)]
+    tes[ltr_reco, on = "name", name := i.new]
     
     ### Putting all together
     # Remove the dups detected
     tes <- tes[!(name %in% dups_list)]
     lx(paste("Removed dups:", length(dups_list)))
-    tes[,pass:=T]
-    tes[,sf:=gsub(".*#","",name), by=.I]
-    tes[name %in% good_line[!(good_line %in% small_line)], pass:=T]
-    tes[grepl("DIRS",name) & (orf1 > 2000) & (lente < 10000), pass:=T]
-    tes[grepl("Crypton",name), pass:=T]
-    tes[grepl("#PLE",name), pass:=T]
-    tes[grepl("#SINE",name) & lente < 500, pass:=T]
-    tes[name %in% good_ltr, pass:=T]
-    tes[name %in% ltr_reco$new, pass:=T]
-    tes[name %in% good_tir, pass:=T]
-    tes[name %in% tir_reco$new, pass:=T]
-    tes[grepl("#RC",name), pass:=T]
-    ucut <- kneedle(tes[,.N,cluster]$cluster,tes[,.N,cluster]$N)
-    lx(paste("Unknown recovery cutpoint:", ucut[1]))
-    tes[grepl("#Unknown",name) & cluster>max(5, ucut[1]) , pass:=T]
-    tes[name %in% small_line, pass:=F]
+    tes[, pass := F]
+    tes[, sf := gsub(".*#", "", name), by = .I]
+    
+    ### Terminal inverted repeats (replaces the old short_tir heuristic).
+    # Only checked where BLAST found no structure, or found one away from the ends
+    # (gap >= 10 bp on either side). A significant terminal TIR then replaces the
+    # structure call. Runs before every rule below that uses `type`.
+    tes[, c("length", "lgap", "rgap") := lapply(.SD, as.numeric), .SDcols = c("length", "lgap", "rgap")]
+    cand <- tes[, which(is.na(type) | lgap >= 10 | rgap >= 10)]
+    if (length(cand) > 0) {
+      tir_res <- rbindlist(mclapply(tes$seq[cand], find_terminal_tir, mc.cores = opt$threads))
+      sig <- which(tir_res$tir_p <= 0.01)
+      if (length(sig) > 0) {
+        tes[cand[sig], `:=`(type = "TIR", length = tir_res$tir_len[sig],
+                            lgap = tir_res$tir_lgap[sig], rgap = tir_res$tir_rgap[sig])]
+      }
+      lx(paste("Terminal TIRs detected:", length(sig), "of", length(cand), "elements checked"))
+    }
+    
+    tes[name %in% good_line[!(good_line %in% small_line)], pass := T]
+    tes[grepl("DIRS", name) & (orf1 > 2000) & (lente < 10000), pass := T]
+    tes[grepl("Crypton", name), pass := T]
+    tes[grepl("#PLE", name), pass := T]
+    tes[grepl("#SINE", name) & lente < 500, pass := T]
+    tes[name %in% good_ltr, pass := T]
+    tes[name %in% ltr_reco$new, pass := T]
+    tes[name %in% good_tir, pass := T]
+    # DNA elements with a TIR near both ends, including TIRs found by the terminal-TIR
+    # finder (good_tir only knows the BLAST calls made before that step)
+    tes[grepl("#DNA", name) & type == "TIR" & lgap < 8 & rgap < 8, pass := T]
+    tes[name %in% tir_reco$new, pass := T]
+    tes[grepl("#RC", name), pass := T]
+    ucut <- tryCatch(kneedle(tes[, .N, cluster]$cluster, tes[, .N, cluster]$N)[1],
+                     error = function(e) NA)
+    if (length(ucut) == 0 || is.na(ucut)) ucut <- 5
+    lx(paste("Unknown recovery cutpoint:", ucut))
+    tes[grepl("#Unknown", name) & cluster > max(5, ucut), pass := T]
+    tes[name %in% small_line, pass := F]
     # This should go at the end of the filters
-    tes[is.na(pa),pa:=100]
-    tes[,TR2:=maxRep>lente/2.5]
-    tes[is.na(TR2), TR2:=F]
-    tes[TR2 == T & type == "LTR" & maxRep > 100, pass == F]
-    tes[type == "TIR" & lgap < 3 & rgap< 3, pass:=T]
+    tes[is.na(pa), pa := 100]
+    tes[, TR2 := maxRep > lente / 2.5]
+    tes[is.na(TR2), TR2 := F]
+    tes[TR2 == T & type == "LTR" & maxRep > 100, pass := F]
+    tes[type == "TIR" & lgap < 3 & rgap < 3, pass := T]
     # Reclassification by TSDs
-    tes[grepl("#Unknown",name) & type == "TIR" & tsd_l == 8 & tsd_c >0.3 & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
-    tes[grepl("#Unknown",name) & type == "TIR" & lgap < 8 & rgap < 8,  `:=`(name=paste0(gsub("#.*","",name),"#DNA",collapse=""),pass=T), by=.I]
-    tes[grepl("#Unknown",name) & tsd_l > 3 & tsd_l < 7 & tsd_c >0.3 & type == "LTR" & length > 150 & lgap < 8 & rgap < 8 & TR2 == F, `:=`(name=paste0(gsub("#.*","",name),"#LTR",collapse=""),pass=T), by=.I]
+    tg_ca <- tes[, grepl("#Unknown", name) & substr(seq, 1, 2) == "TG" &
+                   substr(seq, lente - 1, lente) == "CA" &
+                   tsd_l >= 4 & tsd_l <= 6 & tsd_c > 0.8]
+    tes[tg_ca, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T)]
+    lx(paste("Unknown elements reclassified as LTR by TG..CA termini and TSD:", sum(tg_ca)))
+    
+    tes[grepl("#Unknown", name) & type == "TIR" & tsd_l == 8 & tsd_c > 0.3 & lgap < 8 & rgap < 8, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & type == "TIR" & lgap < 8 & rgap < 8, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & tsd_l > 3 & tsd_l < 7 & tsd_c > 0.3 & type == "LTR" & length > 150 & lgap < 8 & rgap < 8 & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T), by = .I]
     # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
-    tes[grepl("#Unknown",name) & lente < 400 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*","",name),"#SINE",collapse=""),pass=T), by=.I]
-    # Recover DNA elements with short tirs
-    tes[,st:=short_tir(substr(seq,1,10), rc(substr(seq,nchar(seq)-9,nchar(seq)))), .I]
-    tes[st==T & is.na(type), type:="TIR"]
-    tes[st==T & type=="TIR", lgap := 0]
-    tes[st==T & type=="TIR", rgap := 0]
-    tes[st==T & type=="TIR", length:=8]
-    tes[st==T & grepl("DNA",name), pass:= T]
+    tes[grepl("#Unknown", name) & lente < 400 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T), by = .I]
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
-    tes[Ns > (nchar(seq) * opt$Ns), pass:=F]
-    tes[grepl("#LINE", name) & maxRep> 50, pass:=T]
-    lx(paste("TRs discards:", nrow(tes[pass==F])))
-  } 
+    tes[Ns > (nchar(seq) * opt$cons_Ns), pass := F]
+    tes[grepl("#LINE", name) & maxRep > 50, pass := T]
+    
+  } else {
+    tes[, name := gsub(">", "", name)]
+    tes[, `:=`(pass = FALSE, type = NA_character_, length = 0, lgap = 0, rgap = 0,
+               pa = NA_real_, maxRep = NA_real_, tr3_relatives = 0L, fragment_of = NA_character_,
+               Ns = nchar(seq) - nchar(gsub("N", "", seq)))]
+    lx("No self-BLAST hits: structural checks skipped")
+  }
   setwd("..")
   unlink(temp, recursive = TRUE)
   tes <- tes[order(-lente)]
-  tes[,name:=paste0(">",name, collapse = ""), .I]
-  gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x,lgenomes)}))
-  gmax <- apply(gtab, 1,max)
-  tes[gmax < opt$mingen, pass:=F]
+  
+  ### Final names, built from the final class and numbered by length within each class:
+  ### <class>_<n>-<lib>#<class/subclass>. Alignments are renamed to match.
+  tes[, work_id := gsub("#.*", "", name)]
+  tes[, cls := gsub(".*#", "", name)]
+  tes[, short_cls := gsub(".*/", "", cls)]
+  tes[, ix := seq_len(.N), by = short_cls]
+  tes[, name := paste0(short_cls, "_", ix, "-", opt$lib_name, "#", cls)]
+  tes[, fragment_of := name[match(fragment_of, work_id)]]   # container id -> final name
+  for (k in seq_len(nrow(tes))) {
+    old_aln <- file.path("alignments", tes$aln_file[k])
+    if (file.exists(old_aln)) {
+      new_aln <- file.path("alignments", paste0(make.names(tes$name[k]), ".maf"))
+      file.rename(old_aln, new_aln)
+      if (isTRUE(tes$flipped[k])) rc_alignment(new_aln)   # match the library orientation
+    }
+  }
+  tes[, name := paste0(">", name)]
+  
+  gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, lgenomes)}))
+  gmax <- apply(gtab, 1, max)
+  tes[gmax < opt$mingen, pass := F]
+  lx(paste("Elements not passing filters:", nrow(tes[pass == FALSE])))
   wfasta(tes[, c("name", "seq")], paste0(opt$lib_name, "-pantera-final.fa"))
   wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-final-pass.fa"))
-  # wfasta(tes[pass == F, c("name", "seq")], paste0(opt$lib_name, "-pantera-discards.fa"))
-  stats_data <- tes[,c("name","lente","pass", "cluster", "tsd_l","tsd_c","tsd_m","gencount","type",
-                       "length","lgap","rgap","pa","orf1","orf2","orf3","maxRep","Ns")]
+  stats_data <- tes[, c("name", "lente", "pass", "hom_class", "hom_prob", "cluster", "tsd_l", "tsd_c", "tsd_m",
+                        "gencount", "type", "length", "lgap", "rgap", "pa", "tail3_motif", "tail3_len",
+                        "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of",
+                        "orf1", "orf2", "orf3", "maxRep", "Ns")]
   ### Last fixes
-  stats_data[tsd_m == "" | is.na(tsd_m), tsd_c :=0]
-  stats_data$pa <- stats_data$pa<opt$pas
+  stats_data[tsd_m == "" | is.na(tsd_m), tsd_c := 0]
+  stats_data$pa <- stats_data$pa < opt$pAs
   
-  colnames(stats_data) <- c("name","TE_len","pass", "cluster_size", "TSD_length","TSD_confidence","TSD_motif", 
-                            "gen_count","struct_type","struct_len","left_gap",
-                            "right_gap","polyA","orf1","orf2","orf3","maxTR","Ns")
+  colnames(stats_data) <- c("name", "TE_len", "pass", "homology_class", "homology_prob", "cluster_size",
+                            "TSD_length", "TSD_confidence", "TSD_motif",
+                            "gen_count", "struct_type", "struct_len", "left_gap",
+                            "right_gap", "polyA", "tail3_motif", "tail3_len", "tail5_motif", "tail5_len",
+                            "tr3_relatives", "fragment_of", "orf1", "orf2", "orf3", "maxTR", "Ns")
   
-  stats_data <- cbind(stats_data,gtab)
-  stats_data$gen_count <- apply(gtab,1, function(x) {sum(x>0)})
-  fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats.tsv"), 
-         quote =  F, row.names = F, sep ="\t")
+  stats_data <- cbind(stats_data, gtab)
+  stats_data$gen_count <- apply(gtab, 1, function(x) {sum(x > 0)})
+  fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats.tsv"),
+         quote = F, row.names = F, sep = "\t")
 }
 
 
@@ -1555,7 +1787,7 @@ produce_annotation <- function() {
   dir.create("anno")
   system(paste0("makeblastdb -in pantera_lib_0.fa -out anno/pan -dbtype nucl 1> /dev/null"))
   te_data <- fread(cmd= paste0("blastn -query ", opt$lib_name,"-pantera-final.fa -db anno/pan -task blastn -num_threads ", 
-                               detectCores(), 
+                               opt$threads, 
                                " -evalue 500 -outfmt 6"), header = F)
   polys <- ffasta(paste0(opt$lib_name,"-pantera-final.fa"))
   polys[,l:=nchar(seq)]
