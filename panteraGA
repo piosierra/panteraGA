@@ -61,131 +61,145 @@ get_libs <- function() {
 
 # Reads parameters
 read_pars <- function() {
-  
-  spec <- matrix(
-    c("genomes",        "g", 1, "character", # list of genomes
-      "output_folder",  "o", 1, "character", # Output foder [pantera_output]
-      "lib_name",       "b", 1, "character", # Name to append to the output sequences [pantera]
-      "threads",        "T", 1, "integer",   # Number of threads [all]
-      "min_size",       "s", 1, "integer",   # Min size of polymorphic sequences to investigate [200]
-      "max_size",       "l", 1, "integer",   # Max size of polymorphic sequences to investigate [20000]
-      "identity",       "i", 1, "double",    # Cutoff (as distance) to cluster in first pass [0.03]
-      "identity2",      "y", 1, "double",    # Cutoff (as distance) to cluster in second pass [0.05]
-      "min_cl",         "m", 1, "integer",   # Min number of sequences required to cluster [3]
-      "mingen",         "e", 1, "integer",   # Min number of sequences in one genome to cluster [2]
-      "Ns",             "n", 1, "double",   # Max % of Ns allowed in a segment [0]
-      "pAs",            "p", 1, "integer",   # Min number of bases of a polyA [10]
-      "cl_size",        "u", 1, "integer",   # Max number of sequences to cluster [200] 
-      "cons_Ns",        "c", 1, "double",    # Max fraction of Ns in a final consensus [0.02]
-      "anno_per",       "a", 1, "double",   # Percentage of coverage for annotation
-      "anno_div",       "z", 1, "double",   # Percentage of divergence for annotation
-      "flanking",       "f", 1, "integer",   # Min length of flanking sequences [automatic]
-      "flank_quantile", "q", 1, "double",    # Fraction of segments with the shortest flanks to discard [0.05]
-      "verbose",        "v", 0, "logical",   # Show log messages
-      "keep",           "k", 0, "logical",   # Keep alignment files
-      "debug",          "d", 0, "logical",   # Keep intermediate files
-      "help",           "h", 0, "logical"),  # Show this help 
-    byrow = TRUE, ncol = 4)
-  
+
+  # One row per option: long name, short flag, argument (0 none, 1 required),
+  # type, and help text (with the default, which is set further below).
+  options_table <- matrix(
+    c("genomes",        "g", 1, "character", "File with the paths to the genomes, one per line (min 2) [required]",
+      "lib_name",       "b", 1, "character", "Identifier appended to element names [required]",
+      "output_folder",  "o", 1, "character", "Output folder [pantera_output]",
+      "threads",        "T", 1, "integer",   "Threads [8, or the number of cores if fewer]",
+      "min_size",       "s", 1, "integer",   "Min length of polymorphic segments [100]",
+      "max_size",       "l", 1, "integer",   "Max length of polymorphic segments [30000]",
+      "identity1",      "i", 1, "double",    "Identity for clustering, first round [0.90]",
+      "identity2",      "y", 1, "double",    "Identity for clustering, second round [0.85]",
+      "min_cluster",    "m", 1, "integer",   "Min sequences to build a consensus [3]",
+      "max_cluster",    "u", 1, "integer",   "Max sequences per cluster, first round [300]",
+      "min_copies",     "e", 1, "integer",   "Min copies in at least one genome for an element to pass [2]",
+      "max_ns",         "n", 1, "double",    "Max fraction of Ns in a segment [0.001]",
+      "max_cons_ns",    "c", 1, "double",    "Max fraction of Ns in a final consensus [0.02]",
+      "min_polya",      "p", 1, "integer",   "Min length of a polyA tail [10]",
+      "flanking",       "f", 1, "integer",   "Min length of the flanks of a segment [automatic, see -q]",
+      "flank_quantile", "q", 1, "double",    "Without -f: fraction of segments with the shortest flanks to discard [0.05]",
+      "anno_coverage",  "a", 1, "double",    "Min fraction of an element covered by a hit, for annotation [0.80]",
+      "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
+      "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
+      "debug",          "d", 0, "logical",   "Keep intermediate files",
+      "verbose",        "v", 0, "logical",   "Show log messages on screen",
+      "version",        "V", 0, "logical",   "Show the version and exit",
+      "help",           "h", 0, "logical",   "Show this help and exit"),
+    byrow = TRUE, ncol = 5)
+  spec <- options_table[, 1:4]
+
   opt <- getopt(spec)
+
   if (!is.null(opt$help)) {
-    cat(gsub("\\] \\[","\\]\n\\[",getopt(spec, usage = TRUE, command = "panteraGA")))
+    arg <- ifelse(options_table[, 3] == "1",
+                  paste0("<", options_table[, 4], ">"), "")
+    cat("panteraGA ", pantera_version, "\n\n",
+        "Usage: panteraGA -g <genomes file> -b <library name> [options]\n\n",
+        paste0(sprintf("  -%s, --%-16s %-12s %s",
+                       options_table[, 2], options_table[, 1], arg, options_table[, 5]),
+               collapse = "\n"),
+        "\n", sep = "")
     q(status = 0)
   }
-  
-  if (is.null(opt$verbose)) {
-    opt$verbose <- FALSE
+
+  if (!is.null(opt$version)) {
+    cat("panteraGA", pantera_version, "\n")
+    q(status = 0)
   }
-  
-  if (is.null(opt$debug)) {
-    opt$debug <- FALSE
-  }
-  if (is.null(opt$flank_quantile)) {
-    opt$flank_quantile <- 0.05
-  }
-  if (is.null(opt$keep)) {
-    opt$keep <- FALSE
-  }
-  
-  if (is.null(opt$cons_Ns)) {
-    # Consensus Ns are ambiguous alignment columns, not assembly gaps
-    opt$cons_Ns <- 0.02
-  }
-  
+
   if (is.null(opt$genomes)) {
     stop("[--genomes|-g] missing")
   }
-  
+
+  if (is.null(opt$lib_name)) {
+    stop("[--lib_name|-b] missing")
+  }
+
   if (is.null(opt$output_folder)) {
     opt$output_folder <- "pantera_output"
   }
-  
-  if (is.null(opt$lib_name)) {
-    stop("[--lib-name|-b] missing")
-  }
-  
+
   if (is.null(opt$threads)) {
     opt$threads <- min(8, detectCores())
   } else {
     opt$threads <- min(opt$threads, detectCores())
   }
-  
+
   if (is.null(opt$min_size)) {
     opt$min_size <- 100
   }
-  
+
   if (is.null(opt$max_size)) {
     opt$max_size <- 30000
   }
-  
-  if (is.null(opt$identity)) {
-    opt$identity <- 0.90
+
+  if (is.null(opt$identity1)) {
+    opt$identity1 <- 0.90
   }
-  
+
   if (is.null(opt$identity2)) {
     opt$identity2 <- 0.85
   }
-  
-  if (is.null(opt$anno_per)) {
-    opt$anno_per <- 0.80
+
+  if (is.null(opt$min_cluster)) {
+    opt$min_cluster <- 3
   }
-  
-  if (is.null(opt$anno_div)) {
-    opt$anno_div <- 0.80
+
+  if (is.null(opt$max_cluster)) {
+    opt$max_cluster <- 300
   }
-  
-  if (is.null(opt$min_cl)) {
-    opt$min_cl <- 3
+
+  if (is.null(opt$min_copies)) {
+    opt$min_copies <- 2
   }
-  
-  if (is.null(opt$mingen)) {
-    opt$mingen <- 2
+
+  if (is.null(opt$max_ns)) {
+    opt$max_ns <- 0.001
   }
-  
-  if (is.null(opt$Ns)) {
-    # Maximum percentage of Ns in segment.
-    opt$Ns <- 0.001
+
+  if (is.null(opt$max_cons_ns)) {
+    # Consensus Ns are ambiguous alignment columns, not assembly gaps
+    opt$max_cons_ns <- 0.02
   }
-  
-  if (is.null(opt$pAs)) {
-    # Length of polyA.
-    opt$pAs <- 10
+
+  if (is.null(opt$min_polya)) {
+    opt$min_polya <- 10
   }
-  
-  if (is.null(opt$pag)) {
-    # Max gap in polyA.
-    opt$pag <- 5
-  }
-  
-  if (is.null(opt$cl_size)) {
-    # Maximum size of initial cluster to process
-    opt$cl_size <- 300
-  }
-  
-  if (is.null(opt$flanking)) {
-    # Min length of mapping flanking sequences to define an SV. 100 performs automatic adjustment
+
+  # Without -f, svfind is run with 100 bp flanks and the fraction -q of segments
+  # with the shortest flanks is discarded. With -f, that fixed length is used.
+  opt$flank_auto <- is.null(opt$flanking)
+  if (opt$flank_auto) {
     opt$flanking <- 100
   }
+
+  if (is.null(opt$flank_quantile)) {
+    opt$flank_quantile <- 0.05
+  }
+
+  if (is.null(opt$anno_coverage)) {
+    opt$anno_coverage <- 0.80
+  }
+
+  if (is.null(opt$anno_identity)) {
+    opt$anno_identity <- 0.80
+  }
+
+  if (is.null(opt$keep_alignments)) {
+    opt$keep_alignments <- FALSE
+  }
+
+  if (is.null(opt$debug)) {
+    opt$debug <- FALSE
+  }
+
+  if (is.null(opt$verbose)) {
+    opt$verbose <- FALSE
+  }
+
   return(opt)
 }
 
@@ -326,7 +340,7 @@ parseONEview <- function(n) {
                    paste0(opt$output_folder, "/flanks_", i, ".tsv"), sep = "\t")
           }
           
-          if (opt$flanking == 100) {
+          if (opt$flank_auto) {
             mf <- pmin(ovall$flank_l, ovall$flank_r)
             tmpflanking <- if (length(mf) > 0 && opt$flank_quantile > 0) {
               as.numeric(quantile(mf, opt$flank_quantile, type = 1))
@@ -349,7 +363,7 @@ parseONEview <- function(n) {
           # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
           # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
           ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
-          ovall <- ovall[Ns <= (nchar(seq) * opt$Ns)]
+          ovall <- ovall[Ns <= (nchar(seq) * opt$max_ns)]
           lx(paste("Number of valid Ns segments =", nrow(ovall)))
           ovall[, name := paste0(">", name), .I]
           ovret <- rbind(ovret, ovall[, c("name", "seq")])
@@ -598,15 +612,19 @@ init_pantera <- function() {
   lx(paste("Cores detected:", detectCores()))
   lx(paste("Min. size:", opt$min_size))
   lx(paste("Max. size:", opt$max_size))
-  lx(paste("Identity for clustering:", opt$identity))
+  lx(paste("Identity for clustering 1:", opt$identity1))
   lx(paste("Identity for clustering 2:", opt$identity2))
-  lx(paste("Min. sequences to create a consensus:", opt$min_cl))
-  lx(paste("Max fraction of Ns in consensi:", opt$cons_Ns))
-  lx(paste("Max percentage of Ns:", opt$Ns))
-  lx(paste("Max. size of cluster:", opt$cl_size))
-  lx(paste("Minimum size of flanking sequences:", opt$flanking))
+  lx(paste("Min. sequences to create a consensus:", opt$min_cluster))
+  lx(paste("Min. copies in one genome to pass:", opt$min_copies))
+  lx(paste("Min. polyA length:", opt$min_polya))
+  lx(paste("Annotation coverage / identity:", opt$anno_coverage, "/", opt$anno_identity))
+  lx(paste("Max fraction of Ns in consensi:", opt$max_cons_ns))
+  lx(paste("Max fraction of Ns in segments:", opt$max_ns))
+  lx(paste("Max. size of cluster (round 1):", opt$max_cluster))
+  lx(paste("Minimum size of flanking sequences:",
+             if (opt$flank_auto) "automatic" else opt$flanking))
   lx(paste("Flank quantile discarded:", opt$flank_quantile))
-  lx(paste("Keep alignments:", opt$keep))
+  lx(paste("Keep alignments:", opt$keep_alignments))
   lx(paste("Debug (keep intermediates):", opt$debug))
   
   return(0)
@@ -666,23 +684,23 @@ find_repeats <- function() {
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
-        if (nrow(segment_u) >= opt$min_cl)  {
+        if (nrow(segment_u) >= opt$min_cluster)  {
           #    lx(paste0("Num. of segments zone ",start," - ",end," : ", nrow(segment_u)))
           segment_sets <- split(segment_u, 
-                                rep(1:(nrow(segment_u) %/% opt$cl_size +1), 
+                                rep(1:(nrow(segment_u) %/% opt$max_cluster +1), 
                                     length.out = nrow(segment_u), 
                                     each = ceiling(nrow(segment_u) / 
                                                      (nrow(segment_u) %/% 
-                                                        opt$cl_size +1))))
+                                                        opt$max_cluster +1))))
           candidates <- data.table(name = as.character(), 
                                    seq = as.character())
           for (ss in 1:length(segment_sets)) {
             #     lx(paste0("Num. of segments zone ", start," - ", end," : cluster : ",ss))
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
-              sg_clus <- cdhit2(sg, opt$identity)
+              sg_clus <- cdhit2(sg, opt$identity1)
               sg_clus[,n:=.N,clus]
-              sg_clus <- sg_clus[n>=opt$min_cl]
+              sg_clus <- sg_clus[n>=opt$min_cluster]
               
               candidates <- rbindlist(list(candidates, 
                                            sg[name %in% sg_clus$name, 
@@ -881,13 +899,13 @@ cluster_results <- function() {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
         #        lx(paste("Number of sequences:", nrow(segment_u)))
-        if (nrow(segment_u) >= opt$min_cl)  {
+        if (nrow(segment_u) >= opt$min_cluster)  {
           segment_sets <- split(segment_u, 
-                                rep(1:(nrow(segment_u) %/% opt$cl_size +1), 
+                                rep(1:(nrow(segment_u) %/% opt$max_cluster +1), 
                                     length.out = nrow(segment_u), 
                                     each = ceiling(nrow(segment_u) / 
                                                      (nrow(segment_u) %/%
-                                                        opt$cl_size +1))))
+                                                        opt$max_cluster +1))))
           
           consensi <- data.table(name = as.character(), 
                                  seq = as.character())
@@ -897,7 +915,7 @@ cluster_results <- function() {
               #  lx(paste("Segment sets", start, "-", end, ":", nrow(sg)))
               sg_clus <- cdhit2(sg, opt$identity2)
               sg_clus[,n:=.N,clus]
-              sg_clus <- sg_clus[n>=opt$min_cl]
+              sg_clus <- sg_clus[n>=opt$min_cluster]
               
               if ( nrow(sg_clus) > 0) {
                 for (u in unique(sg_clus$clus)) {
@@ -1360,7 +1378,7 @@ cluster_results <- function() {
   cons_threshold <- 0.3
   conserv_threshold <- 0.8
   sat_threshold <- 0.4
-  opt$cl_size <- 1000
+  opt$max_cluster <- 1000
   segments_unique <- ffasta("segments_candidates.fa")
   if (nrow(segments_unique) > 0) {
     lx(paste("Total Unique segments:", nrow(segments_unique)))
@@ -1583,8 +1601,8 @@ stats_tes <- function() {
     tes <- merge(tes, te_data_rep, by.x = "name", by.y = "qseqid", all.x = T)
     tes_count <- nrow(tes)
     
-    tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$pAs), "|", strrep("T", opt$pAs))), function(x) {min(unlist(x)) - 1}))
-    tes$eas <- nchar(tes$seq) - unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$pAs), "|", strrep("T", opt$pAs))), function(x) {max(unlist(x))}))
+    tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$min_polya), "|", strrep("T", opt$min_polya))), function(x) {min(unlist(x)) - 1}))
+    tes$eas <- nchar(tes$seq) - unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$min_polya), "|", strrep("T", opt$min_polya))), function(x) {max(unlist(x))}))
     tes[, pa := min(pas, eas), by = .I]
     tes[substr(seq, 1, 5) == "AAAAA" | substr(seq, 1, 5) == "TTTTT" | substr(seq, lente - 4, lente) == "AAAAA" | substr(seq, lente - 4, lente) == "TTTTT", pa := 0, by = .I]
     
@@ -1726,7 +1744,7 @@ stats_tes <- function() {
     # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
     tes[grepl("#Unknown", name) & lente < 400 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T), by = .I]
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
-    tes[Ns > (nchar(seq) * opt$cons_Ns), pass := F]
+    tes[Ns > (nchar(seq) * opt$max_cons_ns), pass := F]
     tes[grepl("#LINE", name) & maxRep > 50, pass := T]
     
   } else {
@@ -1760,7 +1778,7 @@ stats_tes <- function() {
   
   gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, lgenomes)}))
   gmax <- apply(gtab, 1, max)
-  tes[gmax < opt$mingen, pass := F]
+  tes[gmax < opt$min_copies, pass := F]
   lx(paste("Elements not passing filters:", nrow(tes[pass == FALSE])))
   wfasta(tes[, c("name", "seq")], paste0(opt$lib_name, "-pantera-final.fa"))
   wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-final-pass.fa"))
@@ -1770,7 +1788,7 @@ stats_tes <- function() {
                         "orf1", "orf2", "orf3", "maxRep", "Ns")]
   ### Last fixes
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c := 0]
-  stats_data$pa <- stats_data$pa < opt$pAs
+  stats_data$pa <- stats_data$pa < opt$min_polya
   
   colnames(stats_data) <- c("name", "TE_len", "pass", "homology_class", "homology_prob", "cluster_size",
                             "TSD_length", "TSD_confidence", "TSD_motif",
@@ -1798,12 +1816,12 @@ produce_annotation <- function() {
   polys[,name:=gsub(">","",name)]
   te_data <- merge(te_data,polys,  by.x="V1", by.y ="name")
   te_data[,p:=V4/l]
-  te_data <- te_data[(p>=opt$anno_per) & (V3>= 100*opt$anno_div)]
+  te_data <- te_data[(p>=opt$anno_coverage) & (V3>= 100*opt$anno_identity)]
   te_data[,start:=gsub("-.*","",gsub(".*:","",V2))]
   te_data[,end:=gsub(".*-","",V2)]
   te_data[,l2:=as.numeric(end)-as.numeric(start)]
   te_data[,d2:=l2/l]
-  te_data <- te_data[d2>= opt$anno_div & d2<= (2-opt$anno_div)]
+  te_data <- te_data[d2>= opt$anno_identity & d2<= (2-opt$anno_identity)]
   annotations <- te_data[order(-V4),.(names = paste(V1, collapse = " | ")), V2]
   annotations[,gen:=gsub("#.*","",V2)]
   annotations[,chr:=gsub(":.*","",gsub(".*#","",V2))]
@@ -1826,7 +1844,7 @@ cleanup <- function() {
   # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
   unlink("temp.orfs")
   unlink("*consensi*")
-  if (opt$keep == FALSE) {
+  if (opt$keep_alignments == FALSE) {
     unlink("*.1aln")
   }
   setwd(current)

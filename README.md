@@ -45,28 +45,29 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 
 | Option | Default | Description |
 |---|---|---|
-| `-g, --genomes` | required | File with the list of genomes |
+| `-g, --genomes` | required | File with the paths to the genomes, one per line (min 2) |
 | `-b, --lib_name` | required | Identifier appended to element names |
 | `-o, --output_folder` | `pantera_output` | Output folder |
 | `-T, --threads` | 8 (or the number of cores, if fewer) | Threads |
 | `-s, --min_size` | 100 | Min length of polymorphic segments |
 | `-l, --max_size` | 30000 | Max length of polymorphic segments |
-| `-i, --identity` | 0.90 | Identity for clustering, first round |
+| `-i, --identity1` | 0.90 | Identity for clustering, first round |
 | `-y, --identity2` | 0.85 | Identity for clustering, second round |
-| `-m, --min_cl` | 3 | Min sequences to build a consensus |
-| `-e, --mingen` | 2 | Min copies in at least one genome for an element to pass |
-| `-n, --Ns` | 0.001 | Max fraction of Ns in a segment |
-| `-c, --cons_Ns` | 0.02 | Max fraction of Ns in a final consensus |
-| `-p, --pAs` | 10 | Min length of a polyA tail |
-| `-u, --cl_size` | 300 | Max sequences per cluster |
-| `-f, --flanking` | 100 (automatic) | Min length of the flanks of a segment; 100 uses `-q` instead |
-| `-q, --flank_quantile` | 0.05 | Fraction of segments with the shortest flanks to discard |
-| `-a, --anno_per` | 0.80 | Min coverage of an element for genome annotation |
-| `-z, --anno_div` | 0.80 | Min identity for genome annotation |
-| `-k, --keep` | | Keep the FastGA alignments (`.1aln`) |
+| `-m, --min_cluster` | 3 | Min sequences to build a consensus |
+| `-u, --max_cluster` | 300 | Max sequences per cluster, first round (the second round uses 1000) |
+| `-e, --min_copies` | 2 | Min copies in at least one genome for an element to pass |
+| `-n, --max_ns` | 0.001 | Max fraction of Ns in a segment |
+| `-c, --max_cons_ns` | 0.02 | Max fraction of Ns in a final consensus |
+| `-p, --min_polya` | 10 | Min length of a polyA tail |
+| `-f, --flanking` | automatic | Min length of the flanks of a segment. If not given, the fraction `-q` of segments with the shortest flanks is discarded instead |
+| `-q, --flank_quantile` | 0.05 | Without `-f`: fraction of segments with the shortest flanks to discard |
+| `-a, --anno_coverage` | 0.80 | Min fraction of an element covered by a hit, for genome annotation |
+| `-z, --anno_identity` | 0.80 | Min identity of a hit, and min length ratio hit/element, for genome annotation |
+| `-k, --keep_alignments` | | Keep the FastGA alignments (`.1aln`) |
 | `-d, --debug` | | Keep intermediate files |
 | `-v, --verbose` | | Show log messages on screen |
-| `-h, --help` | | Show the options |
+| `-V, --version` | | Show the version and exit |
+| `-h, --help` | | Show the options and exit |
 
 ### Output
 

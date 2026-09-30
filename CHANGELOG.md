@@ -5,6 +5,26 @@
 First version distributed through bioconda (`conda install -c conda-forge -c bioconda panteraga`).
 The XGBoost model is now downloaded from Zenodo (doi:10.5281/zenodo.22990589) and is no longer stored in git.
 
+### Option names (breaking)
+Long option names were made consistent; short flags are unchanged.
+
+| Old | New |
+|---|---|
+| `--identity` | `--identity1` |
+| `--min_cl` | `--min_cluster` |
+| `--cl_size` | `--max_cluster` |
+| `--mingen` | `--min_copies` |
+| `--Ns` | `--max_ns` |
+| `--cons_Ns` | `--max_cons_ns` |
+| `--pAs` | `--min_polya` |
+| `--anno_per` | `--anno_coverage` |
+| `--anno_div` | `--anno_identity` |
+| `--keep` | `--keep_alignments` |
+
+- `-f/--flanking` is automatic when not given; `-f 100` now means a fixed 100 bp (it used to mean automatic).
+- New `-V/--version`.
+- `-h` lists every option with its default.
+
 ### Packaging
 - R packages are no longer installed at runtime; all dependencies come from conda. `qualV` removed.
 - The install location is resolved through symlinks; `PANTERA_HOME` overrides it.
@@ -14,7 +34,7 @@ The XGBoost model is now downloaded from Zenodo (doi:10.5281/zenodo.22990589) an
 
 ### Fixed
 - `-y/--identity2` was ignored (round 2 clustered at `-i`).
-- `-p` (polyA length) was ignored; the long option is now `--pAs`.
+- `-p` (polyA length) was ignored.
 - `-n` is now a double (was declared integer).
 - `-T` now also limits BLAST; mafft runs single-threaded inside the parallel workers.
 - The flanking filter was computed but never applied; `-f` other than 100 crashed.
@@ -37,7 +57,7 @@ The XGBoost model is now downloaded from Zenodo (doi:10.5281/zenodo.22990589) an
 - LINEs pass with a 3' tail (polyA or short tandem repeat) or 3'-anchored relatives.
 
 ### Added
-- Options `-q/--flank_quantile` (default 0.05) and `-c/--cons_Ns` (default 0.02).
+- Options `-q/--flank_quantile` (default 0.05) and `-c/--max_cons_ns` (default 0.02).
 - Stats columns `homology_class`, `homology_prob`, `tail3_motif`, `tail3_len`, `tail5_motif`, `tail5_len`, `tr3_relatives`, `fragment_of`.
 
 ## [1.1.0]
