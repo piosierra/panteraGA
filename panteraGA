@@ -1,11 +1,8 @@
 #!/usr/bin/env Rscript
 
-### VERSION BEFORE FIXING NAMING
-
-# First version using FastGA alignments.
-# Improved stats and recovery of TEs
-# Dev version to include option to work with list of genomes.
-# Added annotation of polymorphisms in the genomes
+# panteraGA: builds a library of transposable elements from the polymorphic
+# segments found in FastGA whole genome alignments between two or more genomes.
+# https://github.com/piosierra/panteraGA  (MIT licence)
 
 pantera_version <- "1.2.0"
 options(warn = 0)
@@ -370,11 +367,13 @@ rc <- function(s) {
   stri_reverse(chartr("ACGTacgt","TGCAtgca",s))
 }
 
-# End and show message
+# Stops with an error message and a non-zero exit status.
+# The message goes to the log (stdout is sunk there) and also to stderr, so the
+# user sees it without -v and pipelines/CI see the failure.
 end_pantera <- function(message) {
-  cat(paste0(
+  msg <- paste0(
     format(Sys.time(), "%y-%m-%d:%H:%M:%S"),
-    " \u001b[95;1;1m[pantera ",
+    " \u001b[95;1;1m[panteraGA ",
     pantera_version,
     "]\u001b[0m ",
     "\u001b[33;101;1m",
@@ -382,8 +381,11 @@ end_pantera <- function(message) {
     "\u001b[0m : ",
     message,
     "\n"
-  ))
-  quit(save = "no")
+  )
+  cat(msg)
+  verbose <- exists("opt", envir = globalenv()) && isTRUE(get("opt", envir = globalenv())$verbose)
+  if (!verbose) cat(msg, file = stderr())
+  quit(save = "no", status = 1)
 }
 
 ### Detection of small, degraded TIR
