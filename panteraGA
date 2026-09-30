@@ -382,9 +382,10 @@ end_pantera <- function(message) {
     message,
     "\n"
   )
-  cat(msg)
+  logging <- sink.number() > 0
   verbose <- exists("opt", envir = globalenv()) && isTRUE(get("opt", envir = globalenv())$verbose)
-  if (!verbose) cat(msg, file = stderr())
+  if (logging) cat(msg)                               # into pantera.log (and the screen with -v)
+  if (!logging || !verbose) cat(msg, file = stderr()) # on screen, once
   quit(save = "no", status = 1)
 }
 
