@@ -8,6 +8,7 @@
 # The HEAD archive has exactly what the tag tarball will have, so uncommitted
 # changes are NOT tested: commit first.
 # Built packages go to $PANTERA_BLD (default ~/conda-bld-linux) and are reused.
+# A full log is written to $PANTERA_BLD/linux_test.log.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,11 +26,18 @@ docker run --rm --platform linux/amd64 \
   -v "$REPO/recipes":/recipes:ro \
   -v "$BLD":/bld \
   condaforge/miniforge3 bash -euo pipefail -c '
-    conda install -y -q -n base conda-build
+    conda install -y -q -n base conda-build conda-index
+    # Faster packaging of the 830 MB model (only affects this local test)
+    printf "conda_build:\n  zstd_compression_level: 3\n" >> ~/.condarc
+    # Make /bld a valid (possibly empty) local channel
+    mkdir -p /bld/noarch /bld/linux-64
+    python -m conda_index /bld
     CH="-c file:///bld -c conda-forge -c bioconda"
 
+    echo "=== Building alntools ==="
     conda build /recipes/alntools $CH --output-folder /bld
 
+    echo "=== Building panteraga ==="
     cp -r /recipes/panteraga /tmp/panteraga
     if [ "$USE_TAG" = 0 ]; then
       # First source: the HEAD archive instead of the tag tarball (and no sha256)
@@ -37,8 +45,10 @@ docker run --rm --platform linux/amd64 \
              -e "0,/sha256:/{/sha256:/d}" /tmp/panteraga/meta.yaml
     fi
     conda build /tmp/panteraga $CH --output-folder /bld
+    python -m conda_index /bld
 
+    echo "=== Installing panteraga in a fresh environment ==="
     conda create -y -q -n pantera $CH panteraga
     conda run -n pantera panteraGA -h
-    echo "Linux build and tests OK"
-  '
+    echo "=== Linux build and tests OK ==="
+  ' 2>&1 | tee "$BLD/linux_test.log"

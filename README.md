@@ -85,7 +85,7 @@ Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within e
 
 ## Citation
 
-<!-- SOON? -->
+SOON?
 
 The classification model: doi:[10.5281/zenodo.22990589](https://doi.org/10.5281/zenodo.22990589)
 
