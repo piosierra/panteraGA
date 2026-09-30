@@ -92,6 +92,7 @@ The classification model: doi:[10.5281/zenodo.22990589](https://doi.org/10.5281/
 ## Acknowledgements
 
 Thanks to Arian Smit and Robert Hubley (Dfam, RepeatMasker, RepeatModeler) for allowing us to use their curated peptide library in this release.
+Thanks to Claude for helping with the development.
 
 ## Licence
 
