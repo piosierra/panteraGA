@@ -267,7 +267,13 @@ taxa <- trimws(strsplit(opt$taxa, ";")[[1]]); taxa <- taxa[nzchar(taxa)]
 
 # genome file -> accession
 acc_tab <- if (!is.null(opt$accessions)) {
-  a <- fread(opt$accessions, header = FALSE, sep = "\t", col.names = c("genome", "acc"))
+  if (!file.exists(opt$accessions))
+    die("accessions file not found: ", opt$accessions,
+        "\n  It is a two-column TSV: genome file <tab> assembly accession, e.g.\n",
+        "  Amel.fa.gz<tab>GCA_003254395.2")
+  a <- fread(opt$accessions, header = FALSE, sep = "\t")
+  if (ncol(a) < 2) die("accessions file needs two tab-separated columns: ", opt$accessions)
+  a <- a[, 1:2]; setnames(a, c("genome", "acc"))
   setNames(a$acc, a$genome)
 } else character(0)
 accession_for <- function(g) {

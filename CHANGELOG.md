@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.1]
+
+### Fixed
+- When the genome list gave files with a folder (e.g. `genomes/sp1.fa` or an absolute path), clustering failed in most length windows and those segments were silently lost; typically all polymorphisms shorter than ~1.5 kb. Genome lists with plain file names were not affected.
+
 ## [1.3.0]
 
 First version distributed through bioconda (`conda install -c conda-forge -c bioconda panteraga`).
