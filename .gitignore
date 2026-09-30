@@ -6,3 +6,21 @@ panteraGA.Rproj
 .gitattributes
 .pantera.config
 
+# Model: downloaded from Zenodo (https://zenodo.org/records/22990589), never in git
+model/xgbmodel.ubj
+model/xgbmodel.big
+model/*.tar
+model/*.tar.gz
+
+# Runs and builds
+pantera_output/
+test/out*/
+conda-bld*/
+*.1aln
+*.1gdb
+*.gix
+*.ktab
+
+# System / editors
+.DS_Store
+.Rproj.user/
