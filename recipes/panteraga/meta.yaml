@@ -23,7 +23,6 @@ requirements:
     - r-base >=4.1
     - r-getopt
     - r-codetools
-    - r-ips
     - r-ape
     - r-stringi
     - r-data.table

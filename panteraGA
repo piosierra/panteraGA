@@ -49,7 +49,7 @@ lx <- function(x) {
 
 # Loads the required libraries. They are installed as dependencies by conda.
 get_libs <- function() {
-  pkgs <- c("getopt", "parallel", "ips", "Biostrings", "stringi",
+  pkgs <- c("getopt", "parallel", "Biostrings", "stringi",
             "ape", "xgboost", "quantmod", "data.table")
   for (p in pkgs) {
     if (!suppressPackageStartupMessages(require(p, character.only = TRUE,
@@ -510,6 +510,26 @@ reformatDNA <- function(dna) {
   return(temp)
 }
 
+# Aligns DNA sequences with mafft: the same command ips::mafft built, run directly.
+# seqs: DNAbin list. Returns a DNAbin matrix; names as written by mafft ("_R_"
+# prefix for sequences it reversed). Temporary files are named with the process
+# ID, so parallel workers never share one.
+run_mafft <- function(seqs, method = "auto", maxiterate = 0, op = 1.53, ep = 0.123,
+                      options = "--adjustdirection", threads = 1) {
+  fin <- tempfile(pattern = paste0("mafft_in_", Sys.getpid(), "_"), fileext = ".fas")
+  fout <- tempfile(pattern = paste0("mafft_out_", Sys.getpid(), "_"), fileext = ".fas")
+  on.exit(unlink(c(fin, fout)))
+  ape::write.FASTA(seqs, fin)
+  cmd <- paste("mafft", "--quiet", paste0("--", method), "--maxiterate", maxiterate,
+               "--op", op, "--ep", ep, paste(options, collapse = " "),
+               "--thread", threads, shQuote(fin), ">", shQuote(fout))
+  status <- system(cmd)
+  if (status != 0 || !file.exists(fout) || file.info(fout)$size <= 1) {
+    stop("mafft failed (exit status ", status, ")")
+  }
+  ape::read.dna(fout, format = "fasta")
+}
+
 # Reads a cd-hit .clstr file: one row per sequence (name with ">", as in the
 # FASTA), with its cluster number. Read line by line: fread(fill = TRUE) guessed
 # the number of columns from a sample of lines and, when the sample held only
@@ -957,14 +977,12 @@ cluster_results <- function() {
     seqs <- ape::as.DNAbin(clust_temp)
     if (length(seqs) > 1) {
       t0 <- Sys.time()
-      ali <- ips::mafft(seqs,
-                        #      method = "globalpair",
-                        #      maxiterate = 2,
-                        options = c("--adjustdirection"),
-                        ep = 0.123,
-                        thread = 1,
-                        exec = "mafft"
-      )
+      ali <- run_mafft(seqs,
+                       method = "auto",
+                       maxiterate = 0,
+                       ep = 0.123,
+                       options = c("--adjustdirection"),
+                       threads = 1)
       nseqs <- length(seqs)
       mafft_s <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
       aln_len <- if (is.matrix(ali)) ncol(ali) else NA_integer_

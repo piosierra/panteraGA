@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- mafft is called directly instead of through the R package ips, which is no longer a dependency (it brought 38 other R packages). Alignments are identical.
 - In the alignment files (`alignments/*.maf`), each copy shows its flanks in lowercase and the insertion itself in uppercase. The library and the stats are not affected.
 
 ### Fixed
