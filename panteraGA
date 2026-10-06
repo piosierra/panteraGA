@@ -944,11 +944,29 @@ cluster_results <- function() {
   process_zone_2 <- function(zone) {
     start <- as.numeric(zone[1]) - zones_interval_overlap
     end <- as.numeric(zone[2]) + zones_interval_overlap
+    # Timing (written to loop2_*_timing.tsv in the output folder)
+    t_win <- Sys.time()
+    n_seg <- 0
+    cdhit_s <- 0
+    mafft_log <- list()
+    on.exit({
+      if (length(mafft_log) > 0) {
+        fwrite(rbindlist(mafft_log), paste0("timing_mafft_", start, "_", end, ".tsv"), sep = "\t")
+      }
+      fwrite(data.table(win_start = start, win_end = end, n_segments = n_seg,
+                        n_alignments = length(mafft_log), cdhit_s = round(cdhit_s, 2),
+                        mafft_s = round(sum(vapply(mafft_log, function(x) x$seconds, 0)), 2),
+                        total_s = round(as.numeric(difftime(Sys.time(), t_win, units = "secs")), 2),
+                        t_start = round(as.numeric(t_win), 2), t_end = round(as.numeric(Sys.time()), 2),
+                        pid = Sys.getpid()),
+             paste0("timing_win_", start, "_", end, ".tsv"), sep = "\t")
+    }, add = TRUE)
     if (start != end) {
       #    lx(paste("Procesing segments:", start, "-", end))
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
+        n_seg <- nrow(segment_u)
         #        lx(paste("Number of sequences:", nrow(segment_u)))
         if (nrow(segment_u) >= opt$min_cluster)  {
           segment_sets <- split(segment_u, 
@@ -964,7 +982,9 @@ cluster_results <- function() {
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
               #  lx(paste("Segment sets", start, "-", end, ":", nrow(sg)))
+              t0 <- Sys.time()
               sg_clus <- cdhit2(sg, opt$identity2)
+              cdhit_s <- cdhit_s + as.numeric(difftime(Sys.time(), t0, units = "secs"))
               sg_clus[,n:=.N,clus]
               sg_clus <- sg_clus[n>=opt$min_cluster]
               
@@ -975,6 +995,7 @@ cluster_results <- function() {
                   names(clust_temp) <- seqs_clust$name
                   seqs <- ape::as.DNAbin(clust_temp)
                   if (length(seqs) > 1) {
+                    t0 <- Sys.time()
                     ali <- ips::mafft(seqs,
                                       #      method = "globalpair",
                                       #      maxiterate = 2,
@@ -984,6 +1005,13 @@ cluster_results <- function() {
                                       exec = "mafft"
                     )
                     nseqs <- length(seqs)
+                    mafft_log[[length(mafft_log) + 1]] <- data.table(
+                      win_start = start, win_end = end, set = ss, cluster = u,
+                      n_seqs = nseqs, mean_len = round(mean(lengths(clust_temp))),
+                      max_len = max(lengths(clust_temp)),
+                      aln_len = if (is.matrix(ali)) ncol(ali) else NA_integer_,
+                      seconds = round(as.numeric(difftime(Sys.time(), t0, units = "secs")), 2),
+                      t_start = round(as.numeric(t0), 2), pid = Sys.getpid())
                     alim <- reformatDNA(ali)
                     # cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
                     #                                             ambiguityMap = "-",
@@ -1469,6 +1497,16 @@ cluster_results <- function() {
       mc.cores = opt$threads
     )
     lx(paste("Output Loop 2 :", unlist(loop_exit)))
+    # Collect the timing files of all windows
+    for (kind in c("mafft", "win")) {
+      tf <- list.files(pattern = paste0("^timing_", kind, "_"))
+      if (length(tf) > 0) {
+        tt <- rbindlist(lapply(tf, fread))
+        setorder(tt, win_start)
+        fwrite(tt, paste0("../loop2_", ifelse(kind == "win", "window", kind), "_timing.tsv"), sep = "\t")
+      }
+    }
+    lx(paste("Loop 2 timing written to loop2_window_timing.tsv and loop2_mafft_timing.tsv"))
     system("cat consen*.fa >> ../all_consensi.fa")
     setwd("..")
   }
