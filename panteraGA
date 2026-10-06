@@ -83,6 +83,7 @@ read_pars <- function() {
       "flank_quantile", "q", 1, "double",    "Without -f: fraction of segments with the shortest flanks to discard [0.05]",
       "anno_coverage",  "a", 1, "double",    "Min fraction of an element covered by a hit, for annotation [0.80]",
       "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
+      "seed",           "r", 1, "integer",   "Random seed; the same data, -T and seed give the same results [1]",
       "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
       "debug",          "d", 0, "logical",   "Keep intermediate files",
       "verbose",        "v", 0, "logical",   "Show log messages on screen",
@@ -186,6 +187,10 @@ read_pars <- function() {
 
   if (is.null(opt$anno_identity)) {
     opt$anno_identity <- 0.80
+  }
+
+  if (is.null(opt$seed)) {
+    opt$seed <- 1
   }
 
   if (is.null(opt$keep_alignments)) {
@@ -694,6 +699,7 @@ init_pantera <- function() {
   lx(paste("Flank quantile discarded:", opt$flank_quantile))
   lx(paste("Keep alignments:", opt$keep_alignments))
   lx(paste("Debug (keep intermediates):", opt$debug))
+  lx(paste("Random seed:", opt$seed))
   
   return(0)
 }
@@ -2014,6 +2020,12 @@ invisible(tryCatch({opt <- read_pars()}, error = function(err) {
 invisible(tryCatch({init_pantera()}, error = function(err) {
   end_pantera(paste("Initialization error ->",geterrmessage()))
 }))
+
+# Reproducible runs. With this generator, mclapply gives each parallel task its
+# own random stream derived from the seed, so the same data, -T and seed always
+# give the same results (the TIR test uses shuffled sequences).
+RNGkind("L'Ecuyer-CMRG")
+set.seed(opt$seed)
 
 seg_flanks <- data.table(name = character(), lx = numeric(), rx = numeric())
 segments_unique <- data.table(name = as.character(),

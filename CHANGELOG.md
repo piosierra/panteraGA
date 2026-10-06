@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Added
+- `-r/--seed` (default 1): runs are reproducible. The TIR test compares each candidate with shuffled copies, and without a fixed seed borderline TIRs could be detected in one run and not in the next. The same data, `-T` and seed now give identical results.
+
 ### Changed
 - mafft is called directly instead of through the R package ips, which is no longer a dependency (it brought 38 other R packages). Alignments are identical.
 - In the alignment files (`alignments/*.maf`), each copy shows its flanks in lowercase and the insertion itself in uppercase. The library and the stats are not affected.
