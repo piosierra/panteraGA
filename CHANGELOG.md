@@ -6,6 +6,7 @@
 - In the alignment files (`alignments/*.maf`), each copy shows its flanks in lowercase and the insertion itself in uppercase. The library and the stats are not affected.
 
 ### Fixed
+- Cluster members could be silently lost when reading cd-hit's cluster files, if the lines R sampled to guess the file's columns held only single-sequence clusters (shown as the R warning "Stopped early ... Expected 3 fields but found 4"). Clusters could then fall below `-m` and be discarded. The files are now read line by line. This affected all earlier versions.
 - `-s/--min_size` and `-l/--max_size` now apply to the insertion itself. They were applied to the insertion plus its 200 bp of flanks, so `-s 100` let through insertions from 50 bp (the minimum passed to svfind). The default `-s` is now 50, which keeps the same segments as before; values below 50 are also passed to svfind. Consensus sequences must still be at least 100 bp long (or `-s`, if larger), as before.
 - The flanks removed before clustering are the exact ones reported by svfind (its `X` line) instead of a fixed 100 bp per side, which also left 1 flank base on each side.
 - `-n/--max_ns` had no effect: Ns were counted in uppercase on sequences that are still lowercase at that point. (With current FastGA versions segments contain no Ns, so results do not change.)

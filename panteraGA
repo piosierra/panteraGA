@@ -510,16 +510,25 @@ reformatDNA <- function(dna) {
   return(temp)
 }
 
+# Reads a cd-hit .clstr file: one row per sequence (name with ">", as in the
+# FASTA), with its cluster number. Read line by line: fread(fill = TRUE) guessed
+# the number of columns from a sample of lines and, when the sample held only
+# single-sequence clusters, silently stopped at the first line with more fields,
+# dropping the remaining cluster members.
+read_clstr <- function(f) {
+  cl <- readLines(f)
+  hdr <- startsWith(cl, ">Cluster")
+  mem <- !hdr & nzchar(cl)
+  data.table(name = sub("\\.\\.\\..*$", "", sub("^[^>]*", "", cl[mem])),
+             clus = cumsum(hdr)[mem])
+}
+
 # Calls and processes cdhit
 cdhit1 <- function(sequences, threshold) {
   fname <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse=""))
   wfasta(sequences[,1:2],fname)
   system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
-  hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
-  hitcl[,tic:=substr(V2,1,1)]
-  hitcl[,clus:=rleid(tic)]
-  hitcl <- hitcl[tic==">",c("V2","clus")]
-  colnames(hitcl) <- c("name","clus")
+  hitcl <- read_clstr(paste0("cl",fname,".clstr", collapse = ""))
   unlink(fname)
   unlink(paste0("cl",fname,".clstr", collapse = ""))
   unlink(paste0("cl",fname, collapse = ""))
@@ -572,11 +581,7 @@ cdhit2 <- function(sequences, threshold) {
   tseqs[, seq := substr(seq, fl$lx + 1, nchar(seq) - fl$rx)]
   wfasta(tseqs[,1:2],fname)
   system(paste0("cd-hit-est -G 0 -A 40 -n 8 -g 1 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
-  hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
-  hitcl[,tic:=substr(V2,1,1)]
-  hitcl[,clus:=rleid(tic)]
-  hitcl <- hitcl[tic==">",c("V2","clus")]
-  colnames(hitcl) <- c("name","clus")
+  hitcl <- read_clstr(paste0("cl",fname,".clstr", collapse = ""))
   unlink(fname)
   unlink(paste0("cl",fname,".clstr", collapse = ""))
   unlink(paste0("cl",fname, collapse = ""))
