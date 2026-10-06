@@ -83,6 +83,7 @@ read_pars <- function() {
       "flank_quantile", "q", 1, "double",    "Without -f: fraction of segments with the shortest flanks to discard [0.05]",
       "anno_coverage",  "a", 1, "double",    "Min fraction of an element covered by a hit, for annotation [0.80]",
       "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
+      "align_iterations","I", 1, "integer",  "Max mafft refinement iterations for clusters of < 100 sequences < 3 kb; 1000 = mafft --auto [2]",
       "seed",           "r", 1, "integer",   "Random seed; the same data, -T and seed give the same results [1]",
       "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
       "debug",          "d", 0, "logical",   "Keep intermediate files",
@@ -187,6 +188,13 @@ read_pars <- function() {
 
   if (is.null(opt$anno_identity)) {
     opt$anno_identity <- 0.80
+  }
+
+  if (is.null(opt$align_iterations)) {
+    opt$align_iterations <- 2
+  }
+  if (opt$align_iterations < 0) {
+    stop("[--align_iterations|-I] must be 0 or more")
   }
 
   if (is.null(opt$seed)) {
@@ -700,6 +708,7 @@ init_pantera <- function() {
   lx(paste("Keep alignments:", opt$keep_alignments))
   lx(paste("Debug (keep intermediates):", opt$debug))
   lx(paste("Random seed:", opt$seed))
+  lx(paste("mafft iterations for small clusters:", opt$align_iterations))
   
   return(0)
 }
@@ -983,9 +992,14 @@ cluster_results <- function() {
     seqs <- ape::as.DNAbin(clust_temp)
     if (length(seqs) > 1) {
       t0 <- Sys.time()
+      # mafft --auto aligns clusters of < 100 sequences whose longest sequence is
+      # < 3 kb with L-INS-i and up to 1000 refinement iterations (most of the
+      # alignment time). Same method here, with at most -I iterations; other
+      # clusters keep mafft --auto's choice.
+      small <- length(seqs) < 100 && max(lengths(clust_temp)) < 3000
       ali <- run_mafft(seqs,
-                       method = "auto",
-                       maxiterate = 0,
+                       method = if (small) "localpair" else "auto",
+                       maxiterate = if (small) opt$align_iterations else 0,
                        ep = 0.123,
                        options = c("--adjustdirection"),
                        threads = 1)
