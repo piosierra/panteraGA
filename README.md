@@ -78,7 +78,7 @@ In the output folder:
 | `mylib-pantera-final.fa` | All TE consensus sequences |
 | `mylib-pantera-final-pass.fa` | Only the elements that pass the structural checks |
 | `mylib-pantera-final.stats.tsv` | Per element: length, class, pass, cluster size, TSD, terminal repeats, tails, copies per genome... |
-| `alignments/` | The alignment (`.maf`) behind each consensus, named as the element |
+| `alignments/` | The alignment (`.maf`) behind each consensus, named as the element. Each copy shows its flanks in lowercase and the insertion in uppercase |
 | `annotations/` | A BED file per genome with the copies of each element |
 | `pantera.log` | Log of the run |
 

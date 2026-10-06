@@ -538,6 +538,29 @@ seg_flank_lengths <- function(names) {
   fl
 }
 
+# Case for aligned segments: flanks in lowercase, the insertion in uppercase.
+# Names are as in the alignment: mafft's "_R_" prefix marks copies it reversed,
+# whose left and right flanks are therefore swapped. Only letters change case;
+# gaps and the alignment columns are untouched.
+case_flanks <- function(names, aligned) {
+  bare <- sub("^_R_", "", gsub(">", "", names))
+  reversed <- startsWith(gsub(">", "", names), "_R_")
+  fl <- seg_flank_lengths(paste0(">", bare))
+  left <- ifelse(reversed, fl$rx, fl$lx)
+  right <- ifelse(reversed, fl$lx, fl$rx)
+  mapply(function(s, l, r) {
+    ch <- strsplit(toupper(s), "")[[1]]
+    pos <- which(ch != "-")
+    n <- length(pos)
+    if (n == 0) return(paste0(ch, collapse = ""))
+    l <- min(l, n)
+    r <- min(r, n)
+    if (l > 0) ch[pos[1:l]] <- tolower(ch[pos[1:l]])
+    if (r > 0) ch[pos[(n - r + 1):n]] <- tolower(ch[pos[(n - r + 1):n]])
+    paste0(ch, collapse = "")
+  }, aligned, left, right, USE.NAMES = FALSE)
+}
+
 # Calls cdhit with alternative options
 cdhit2 <- function(sequences, threshold) {
   tseqs <- copy(sequences)
@@ -1371,7 +1394,7 @@ cluster_results <- function() {
                       (alll-cutl) > 180) {  # Remove clusters that include the edges, they are most likely segdups
                     consensi <- rbindlist(list(consensi, data.table(name = nam, 
                                                                     seq = cons)))
-                    alim <- data.table(name=names(alim),seq=alim)
+                    alim <- data.table(name=names(alim),seq=case_flanks(names(alim), alim))
                     alim[,name:=paste0(">",gsub(">","",name))]
                     wfasta(alim, paste0("../alignments/",substr(make.names(nam),1,36),".maf"))
                     
