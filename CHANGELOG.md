@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Fixed
-- `-s/--min_size` and `-l/--max_size` now apply to the insertion itself. They were applied to the insertion plus its 200 bp of flanks, so `-s 100` let through insertions from 50 bp (the minimum passed to svfind). The default `-s` is now 50, which keeps the same segments as before; values below 50 are also passed to svfind.
+- `-s/--min_size` and `-l/--max_size` now apply to the insertion itself. They were applied to the insertion plus its 200 bp of flanks, so `-s 100` let through insertions from 50 bp (the minimum passed to svfind). The default `-s` is now 50, which keeps the same segments as before; values below 50 are also passed to svfind. Consensus sequences must still be at least 100 bp long (or `-s`, if larger), as before.
 - The flanks removed before clustering are the exact ones reported by svfind (its `X` line) instead of a fixed 100 bp per side, which also left 1 flank base on each side.
 - `-n/--max_ns` had no effect: Ns were counted in uppercase on sequences that are still lowercase at that point. (With current FastGA versions segments contain no Ns, so results do not change.)
 - The "Largest/Smallest insertion" log lines report the insertion length (previously "segment", with the round 2 values inconsistent).

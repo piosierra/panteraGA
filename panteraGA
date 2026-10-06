@@ -1367,7 +1367,7 @@ cluster_results <- function() {
                   # cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
                   nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
                                 nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif, "_gens",gencounts,"@@")
-                  if ((nchar(cons) >= opt$min_size) &
+                  if ((nchar(cons) >= max(100, opt$min_size)) &
                       (alll-cutl) > 180) {  # Remove clusters that include the edges, they are most likely segdups
                     consensi <- rbindlist(list(consensi, data.table(name = nam, 
                                                                     seq = cons)))
