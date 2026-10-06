@@ -941,6 +941,469 @@ get_highest_letter <- function(mat, cons_threshold = 0.3) {
 # Second pass. Cluster and generate consensus. 
 cluster_results <- function() {
   
+  # Aligns one cluster from round 2 and builds its consensus. Returns the consensus
+  # (or NULL), where it goes (the window's consensi file and its rank there), and timing.
+  process_cluster_2 <- function(job) {
+    start <- job$start
+    end <- job$end
+    u <- job$u
+    seqs_clust <- job$seqs
+    t_job <- Sys.time()
+    result <- NULL
+    mafft_s <- NA_real_
+    aln_len <- NA_integer_
+    clust_temp <- strsplit(seqs_clust$seq, "")
+    names(clust_temp) <- seqs_clust$name
+    seqs <- ape::as.DNAbin(clust_temp)
+    if (length(seqs) > 1) {
+      t0 <- Sys.time()
+      ali <- ips::mafft(seqs,
+                        #      method = "globalpair",
+                        #      maxiterate = 2,
+                        options = c("--adjustdirection"),
+                        ep = 0.123,
+                        thread = 1,
+                        exec = "mafft"
+      )
+      nseqs <- length(seqs)
+      mafft_s <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+      aln_len <- if (is.matrix(ali)) ncol(ali) else NA_integer_
+      alim <- reformatDNA(ali)
+      # cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
+      #                                             ambiguityMap = "-",
+      #                                             threshold = cons_threshold))
+      
+      ### TSD data
+      ## ==========================================================================
+      ## Everything below, down to the "tsd_len/tsds_conf/tsds_motif" assignments,
+      ## replaces the previous single-pass "consensusMatrix -> stri_locate cons_s/
+      ## cons_e -> fixed-window tsds2 match count" block. Nothing after this
+      ## comment needs to change: it still ends by handing back `cons` as the
+      ## FULL, un-sliced per-column consensus (same length as the alignment,
+      ## gaps included) plus `cons_s`, `cons_e`, `tsd_len`, `tsds_conf`,
+      ## `tsds_motif` under their original names, so `alll <- nchar(cons)`,
+      ## `cons <- substr(cons,cons_s,cons_e)`, and the `nam <- ...` line all work
+      ## unmodified.
+      ##
+      ## `alim` is already the plain character vector reformatDNA() produces (one
+      ## aligned string per sequence, same length, gaps as "-") - nothing here
+      ## needs it wrapped in a DNAStringSet except where consensusMatrix/
+      ## consensusString specifically require one, matching how the original code
+      ## already called Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim)).
+      ##
+      ## Deliberately NOT filtering all-gap columns before building consstring
+      ## (unlike some earlier drafts of this logic): an all-gap column already
+      ## fails the saturation check on its own and reads as "0" in consstring, so
+      ## filtering buys nothing here, and skipping it avoids a coordinate offset
+      ## between consstring's index and alim's actual column index that filtering
+      ## would otherwise introduce.
+      ## ==========================================================================
+      
+      cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
+      dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
+      saturation <- unlist(lapply(dtMatrix[1:4],sum))/nseqs
+      conserv <- unlist(lapply(dtMatrix[1:4],max))/(saturation*nseqs)
+      consstring <- paste0(as.numeric(conserv>=conserv_threshold & saturation >= sat_threshold),collapse = "")
+      cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),], cons_threshold),collapse="")
+      cons_full <- cons   # the full, un-sliced consensus - `cons` gets reassigned to this
+      # at the very end so the unchanged code after this block
+      # still does its own substr(cons, cons_s, cons_e) trim
+      
+      get_sequence_value <- function(x) {
+        ifelse(x == 2, 9,
+               ifelse(x == 3, 7,
+                      ifelse(x == 4, 6,
+                             ifelse(x <= 8, 5,
+                                    ifelse(x <= 13, 4,
+                                           ifelse(x <= 20, 3, 2))))))
+      }
+      cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,get_sequence_value(nseqs)),collapse =""))[1]
+      if (is.na(cons_s)) next   # no conserved block: skip this cluster, not the whole window
+      ## ---- cons_e: end of the same conserved block cons_s belongs to ----------
+      ## Trivial gaps (<= small_gap columns - ordinary single-base dropouts inside
+      ## an otherwise solid block) always bridge. Larger gaps only bridge if
+      ## there's substantial conservation resuming within `lookahead` columns -
+      ## this tolerates real internal insertions of essentially unbounded length
+      ## (confirmed necessary on a real LTR-Gypsy element with a ~700bp internal
+      ## low-conservation stretch) while still rejecting a lone downstream
+      ## coincidental match (confirmed necessary on a real LINE alignment where an
+      ## unrelated 6bp conserved stretch sat ~220bp past the true element end).
+      run_len <- get_sequence_value(nseqs)
+      lookahead <- 1000
+      min_cluster_total <- 10
+      small_gap <- 20
+      
+      x <- as.numeric(strsplit(consstring, "")[[1]])
+      rl <- rle(x)
+      run_ends   <- cumsum(rl$lengths)
+      run_starts <- run_ends - rl$lengths + 1
+      solid <- which(rl$values == 1 & rl$lengths >= run_len)
+      
+      j <- match(solid[which(run_starts[solid] <= cons_s & run_ends[solid] >= cons_s)], solid)
+      cons_e_raw <- run_ends[solid[j]]
+      while (j < length(solid)) {
+        gap <- run_starts[solid[j + 1]] - run_ends[solid[j]] - 1
+        if (gap > small_gap) {
+          window_end <- run_ends[solid[j]] + lookahead
+          idx_ahead <- solid[solid > solid[j]]
+          idx_ahead <- idx_ahead[run_starts[idx_ahead] <= window_end]
+          total_ahead <- sum(rl$lengths[idx_ahead])
+          if (total_ahead < min_cluster_total) break
+        }
+        j <- j + 1
+        cons_e_raw <- run_ends[solid[j]]
+      }
+      cons_s_raw <- cons_s
+      
+      ## ---- Generic, motif-agnostic per-sequence TSD caller --------------------
+      ## Tests whether each sequence's own left-flank tail matches its own
+      ## right-flank head, for lengths 2-13. This needs no assumption about what
+      ## the TSD looks like: a family-fixed motif (Tc1/Mariner's "TA", PiggyBac's
+      ## "TTAA"), a partially-degenerate motif (CACTA/hAT-style "GTNAC"-type target
+      ## sites), and a variable-content but fixed-length target (most hAT elements)
+      ## all show up the same way here - only the aggregate statistics downstream
+      ## differ.
+      ##
+      ## Speed: the caller only ever looks at the K = 13 + 6 bases next to an edge
+      ## (longest TSD plus largest offset), so per edge position we extract just
+      ## those bases once, as an nseqs x K matrix, cache it, and score all TSD
+      ## lengths for all sequences with vectorised comparisons. The motif string
+      ## (the slow Biostrings call) is built only for the final choice.
+      ##
+      ## Null match probability p0: the previous code estimated it from the
+      ## flank base composition, but counted only upper-case bases while the
+      ## aligned sequences are lower case, so it was always 0.25. That behaviour
+      ## is kept (use_local_composition = FALSE). Setting it to TRUE uses the real
+      ## flank composition, computed from the column counts in cMatrix.
+      tsd_max <- 13L
+      off_max <- 6L
+      K <- tsd_max + off_max
+      use_local_composition <- TRUE
+      
+      tail_cache <- new.env()
+      head_cache <- new.env()
+      # Last K ungapped bases before column cs, per sequence (left-padded with NA)
+      left_tail <- function(cs) {
+        key <- as.character(cs)
+        v <- tail_cache[[key]]
+        if (is.null(v)) {
+          v <- t(vapply(alim, function(s) {
+            x <- if (cs > 1) strsplit(gsub("-", "", substr(s, 1, cs - 1)), "")[[1]] else character(0)
+            x <- tail(x, K)
+            c(rep(NA_character_, K - length(x)), x)
+          }, character(K), USE.NAMES = FALSE))
+          assign(key, v, envir = tail_cache)
+        }
+        v
+      }
+      # First K ungapped bases after column ce, per sequence (right-padded with NA)
+      right_head <- function(ce) {
+        key <- as.character(ce)
+        v <- head_cache[[key]]
+        if (is.null(v)) {
+          v <- t(vapply(alim, function(s) {
+            x <- strsplit(gsub("-", "", substr(s, ce + 1, nchar(s))), "")[[1]]
+            x <- head(x, K)
+            c(x, rep(NA_character_, K - length(x)))
+          }, character(K), USE.NAMES = FALSE))
+          assign(key, v, envir = head_cache)
+        }
+        v
+      }
+      cum_acgt <- t(apply(cMatrix[c("A", "C", "G", "T"), , drop = FALSE], 1, cumsum))
+      p0_for <- function(cs, ce) {
+        if (!use_local_composition) return(0.25)
+        cnt <- (if (cs > 1) cum_acgt[, cs - 1] else 0) + cum_acgt[, ncol(cum_acgt)] - cum_acgt[, ce]
+        if (sum(cnt) == 0) return(0.25)
+        sum((cnt / sum(cnt))^2)
+      }
+      # Per-sequence best TSD: for each length 2..13, compare the last x bases of the
+      # left flank with the first x bases of the right flank (after skipping offl/offr
+      # bases next to the edges), keep lengths with >= 80% identity, and take the
+      # length with the smallest binomial p-value (first one on ties).
+      call_tsd_fast <- function(Lt, Rh, offl = 0L, offr = 0L, p0 = 0.25,
+                                min_len = 2L, min_identity = 0.8) {
+        n <- nrow(Lt)
+        max_x <- pmin(tsd_max, rowSums(!is.na(Lt)) - offl, rowSums(!is.na(Rh)) - offr)
+        best_p <- rep(Inf, n)
+        best_x <- rep(NA_integer_, n)
+        for (xx in min_len:tsd_max) {
+          ok <- max_x >= xx
+          if (!any(ok)) break
+          nm <- rowSums(Lt[, (K - offl - xx + 1):(K - offl), drop = FALSE] ==
+                          Rh[, (offr + 1):(offr + xx), drop = FALSE], na.rm = TRUE)
+          pv <- stats::pbinom(nm - 1, size = xx, prob = p0, lower.tail = FALSE)
+          upd <- ok & (nm / xx >= min_identity) & (pv < best_p)
+          best_p[upd] <- pv[upd]
+          best_x[upd] <- xx
+        }
+        list(tsd_len = best_x, pval = signif(best_p, 3))
+      }
+      # Most frequent significant TSD length (longest one on ties), the fraction of ALL
+      # sequences that agree on it, and which sequences those are.
+      summarize_tsd <- function(calls, sig_threshold = 0.1) {
+        sig <- which(!is.na(calls$tsd_len) & calls$pval <= sig_threshold)
+        if (length(sig) == 0) return(list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0)))
+        counts <- tabulate(calls$tsd_len[sig], nbins = tsd_max)
+        modal_len <- max(which(counts == max(counts)))
+        list(modal_len = modal_len,
+             modal_conf = round(max(counts) / length(calls$tsd_len), 2),
+             rows = sig[calls$tsd_len[sig] == modal_len])
+      }
+      tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = 2) {
+        k <- summ$modal_len
+        if (is.na(k) || length(summ$rows) < min_support) return("")
+        l_side <- apply(Lt[summ$rows, (K - offl - k + 1):(K - offl), drop = FALSE], 1, paste, collapse = "")
+        r_side <- apply(Rh[summ$rows, (offr + 1):(offr + k), drop = FALSE], 1, paste, collapse = "")
+        Biostrings::consensusString(Biostrings::DNAStringSet(c(r_side, l_side)),
+                                    ambiguityMap = Biostrings::IUPAC_CODE_MAP, shift = 0L, width = NULL)
+      }
+      score_candidate <- function(cs, ce) {
+        p0_try <- p0_for(cs, ce)
+        calls_try <- call_tsd_fast(left_tail(cs), right_head(ce), p0 = p0_try)
+        summ_try <- summarize_tsd(calls_try)
+        list(score = summ_try$modal_conf, calls = calls_try, summary = summ_try, p0 = p0_try)
+      }
+      ## ---- Is the agreement between copies more than chance? --------------------
+      ## A copy "has" a TSD of length L by chance with probability q_L (>= 80% of L
+      ## positions matching at the null match probability p0): about 1/16 for 2 bp,
+      ## 1/64 for 3-5 bp, much less for longer ones. The chance that k or more of n
+      ## copies agree on one length is then binomial. This is a p-value for ONE edge
+      ## position and ONE length, so it is multiplied by the number of lengths tried
+      ## and, in the shift search, by the number of edge positions tried. Without
+      ## that, a 3-copy cluster finds a chance 2 bp "TSD" (2 of 3 copies) somewhere
+      ## in the ~600 candidates almost every time.
+      tsd_alpha <- 0.05
+      tsd_pvalue <- function(summ, p0, n = nseqs, min_identity = 0.8) {
+        L <- summ$modal_len
+        if (is.na(L)) return(1)
+        q <- stats::pbinom(ceiling(min_identity * L - 1e-9) - 1, L, p0, lower.tail = FALSE)
+        stats::pbinom(length(summ$rows) - 1, n, q, lower.tail = FALSE)
+      }
+      
+      ## ---- Boundary-shift search: is the raw edge actually right? -------------
+      ## A coincidentally-conserved TSD flanking the true boundary (see caller
+      ## notes above) is not random flanking DNA - the transposase actively
+      ## selects and duplicates it - so it can get pulled into, or trimmed out of,
+      ## the raw conservation-based edge above. Search a small window of
+      ## independent shifts for cons_s and cons_e, and for each candidate, re-run
+      ## the TSD caller (which needs no knowledge of what the TSD looks like).
+      ## Only trust a shift once it clearly beats making no shift at all, and
+      ## among shifts that do, take the SMALLEST one: a real target motif is
+      ## often itself a short tandem-repeat unit and TE termini are frequently
+      ## AT-rich right where the true sequence begins, so several different
+      ## shifts within that repetitive stretch can score equally well (any
+      ## even-numbered shift inside a "TATATA..." run still looks like a perfect
+      ## 2bp match) - there is no well-defined maximum to chase there, and
+      ## chasing one anyway means sliding arbitrarily deep into real element
+      ## sequence.
+      shift_range <- -12:12
+      min_core <- 20   # never shrink the core below this many columns
+      baseline <- score_candidate(cons_s_raw, cons_e_raw)
+      all_results <- list(`0_0` = list(ds = 0, de = 0, cons_s = cons_s_raw, cons_e = cons_e_raw,
+                                       score = baseline$score, calls = baseline$calls, summary = baseline$summary,
+                                       p0 = baseline$p0))
+      for (ds in shift_range) {
+        cs <- cons_s_raw + ds
+        if (cs < 1) next
+        for (de in shift_range) {
+          ce <- cons_e_raw + de
+          if (ce > nchar(cons_full) || ce - cs < min_core) next
+          if (ds == 0 && de == 0) next
+          cand <- score_candidate(cs, ce)
+          all_results[[paste(ds, de, sep = "_")]] <- list(ds = ds, de = de, cons_s = cs, cons_e = ce,
+                                                          score = cand$score, calls = cand$calls, summary = cand$summary,
+                                                          p0 = cand$p0)
+        }
+      }
+      
+      adequate_support <- 0.65   # at least ~2/3 of sequences must independently agree on one TSD
+      # length before a shift is trusted at all
+      
+      ## An inward shift turns element columns into flank. A TSD pulled into the raw
+      ## edge can only account for as many columns as the TSD itself is long, so reject
+      ## candidates that trim more than that on either side. Without this, the
+      ## self-complementary core of a TIR (e.g. ...GC|...|GC... inside GGGGGC...GCCCCC)
+      ## is shared by every copy and scores as a perfect, but false, 2 bp "TSD".
+      inward_ok <- function(r) {
+        k <- r$summary$modal_len
+        !is.na(k) && max(r$ds, 0) <= k && max(-r$de, 0) <= k
+      }
+      ## The raw edges come from conservation alone, before any TSD is looked at, so
+      ## a TSD there is one test (corrected only for the lengths tried). A TSD found
+      ## by moving the edges is corrected for every edge position tried. Using the
+      ## full correction at the raw edges too would reject a real 5 bp TSD in a small
+      ## cluster and accept the exact 4 bp match that a 1 bp shift always produces
+      ## from it (4 of its 5 bases), growing the element by 1 bp.
+      n_tests <- length(all_results) * (tsd_max - 1L)     # edge positions x TSD lengths
+      significant <- function(r) {
+        m <- if (r$ds == 0 && r$de == 0) tsd_max - 1L else n_tests
+        tsd_pvalue(r$summary, r$p0) * m <= tsd_alpha
+      }
+      eligible <- Filter(function(r) r$score >= adequate_support && inward_ok(r) && significant(r), all_results)
+      best <- if (length(eligible) == 0) {
+        all_results[["0_0"]]
+      } else {
+        eligible[[which.min(vapply(eligible, function(r) abs(r$ds) + abs(r$de), numeric(1)))]]
+      }
+      
+      ## ---- Cliff-validated extension -------------------------------------------
+      ## "Smallest adequate shift" avoids drifting into a repeat, but can stop one
+      ## base short of the true edge: confirmed on a real CACTA-type element
+      ## where the element's own terminal base coincides with the edge of a 5bp
+      ## target motif and only the middle 3 bases are actually duplicated - the
+      ## smallest adequate shift alone found a real but incomplete 2bp match, one
+      ## base short of a perfect 3bp one. What distinguishes that from a genuine
+      ## repeat plateau isn't the confidence score (both can be high, even
+      ## perfect, across several nearby shifts) - it's what happens ONE STEP
+      ## FURTHER STILL. Past a real, discrete TSD, support collapses sharply
+      ## (confirmed: 26/26 sequences matching perfectly, one base later 0/26).
+      ## Inside a repeat, support stays high indefinitely as the match just
+      ## re-phases against it (confirmed: 6/6 sequences kept matching, just at a
+      ## shifting length, several bases out). So: only extend the anchor by one
+      ## step if that step is itself well-supported AND the step immediately
+      ## beyond it collapses.
+      collapse_below <- 0.15
+      directions <- list(c(-1, 0), c(1, 0), c(0, -1), c(0, 1))
+      extension <- NULL
+      for (dir in directions) {
+        step1_ds <- best$ds + dir[1]; step1_de <- best$de + dir[2]
+        step1 <- all_results[[paste(step1_ds, step1_de, sep = "_")]]
+        if (is.null(step1) || step1$score < adequate_support || !inward_ok(step1) || !significant(step1)) next
+        step2_ds <- best$ds + 2 * dir[1]; step2_de <- best$de + 2 * dir[2]
+        step2_cs <- cons_s_raw + step2_ds; step2_ce <- cons_e_raw + step2_de
+        step2 <- if (step2_cs >= 1 && step2_ce <= nchar(cons_full) && step2_ce - step2_cs >= min_core) {
+          cand <- all_results[[paste(step2_ds, step2_de, sep = "_")]]
+          if (is.null(cand)) score_candidate(step2_cs, step2_ce) else cand
+        } else {
+          list(score = 1)   # ran off the end of the sequence - can't confirm a cliff, so don't extend
+        }
+        if (step2$score < collapse_below) {
+          if (is.null(extension) || step1$score > extension$score) extension <- step1
+        }
+      }
+      if (!is.null(extension)) best <- extension
+      
+      cons_s <- best$cons_s
+      cons_e <- best$cons_e
+      tsd_calls <- best$calls
+      tsd_summary <- best$summary
+      Lt <- left_tail(cons_s)
+      Rh <- right_head(cons_e)
+      motif_offl <- 0L
+      motif_offr <- 0L
+      summary_p0 <- best$p0
+      
+      ## ---- Offset-aware refinement (variable-content, fixed-length TSDs) ------
+      ## The search above only ever tests matches flush against cons_s/cons_e.
+      ## Some real TSDs sit a few bases IN from the boundary on one side rather
+      ## than flush against it (confirmed on a real "Unknown" bat repeat where
+      ## the right-side TSD copy sat 1-4 bases into the flank). This does NOT
+      ## move cons_s/cons_e - the boundary is already settled above - it only
+      ## improves what gets reported as the TSD itself.
+      ##
+      ## This needs a different bar than the boundary search: a family-fixed
+      ## motif should show up in nearly every copy, but a variable-content,
+      ## fixed-length TSD (most hAT-type elements) is a DIFFERENT sequence at
+      ## every insertion, so only copies that haven't diverged past recognition
+      ## will still show a detectable match - real signal can legitimately show
+      ## up in well under half the sequences. Judge by an absolute COUNT of
+      ## highly-significant, length-consistent matches at a shared offset rather
+      ## than a majority-fraction threshold, and among offsets clearing that
+      ## count, take the smallest total offset (same repeat-plateau risk as the
+      ## boundary search applies here too).
+      strict_pval <- 0.01
+      min_strict_count <- 6
+      p0_final <- p0_for(cons_s, cons_e)
+      offset_candidates <- list()
+      for (offl in 0:off_max) {
+        for (offr in 0:off_max) {
+          calls_off <- call_tsd_fast(Lt, Rh, offl, offr, p0 = p0_final)
+          strict <- which(!is.na(calls_off$tsd_len) & calls_off$pval <= strict_pval)
+          if (length(strict) == 0) next
+          cnt <- max(tabulate(calls_off$tsd_len[strict], nbins = tsd_max))
+          if (cnt >= min_strict_count) {
+            offset_candidates[[paste(offl, offr, sep = "_")]] <- list(
+              offl = offl, offr = offr, count = cnt, calls = calls_off,
+              summary = summarize_tsd(calls_off)
+            )
+          }
+        }
+      }
+      if (length(offset_candidates) > 0) {
+        best_offset <- offset_candidates[[which.min(vapply(offset_candidates, function(r) r$offl + r$offr, numeric(1)))]]
+        baseline_strict_count <- sum(!is.na(tsd_calls$tsd_len) & tsd_calls$pval <= strict_pval)
+        if (best_offset$count > baseline_strict_count) {
+          tsd_calls <- best_offset$calls
+          tsd_summary <- best_offset$summary
+          motif_offl <- best_offset$offl
+          motif_offr <- best_offset$offr
+          summary_p0 <- p0_final
+        }
+      }
+      ## Report a TSD only if the agreement at the final edges is more than chance
+      ## (one edge position, so corrected only for the number of lengths tried).
+      ## Otherwise it would still feed the TSD-based reclassification rules.
+      if (tsd_pvalue(tsd_summary, summary_p0) * (tsd_max - 1L) > tsd_alpha) {
+        tsd_summary <- list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0))
+      }
+      tsd_summary$modal_motif <- tsd_motif(tsd_summary, Lt, Rh, motif_offl, motif_offr)
+                     
+      tsd_len    <- tsd_summary$modal_len
+      tsds_conf  <- tsd_summary$modal_conf
+      tsds_motif <- tsd_summary$modal_motif
+      if (is.na(tsd_len)) {
+        # No significant TSD found at all - fall back to the same degenerate
+        # "no signal" values the original fixed-window method produced in this
+        # situation (tsd_len 2, confidence 0), so downstream filename/logic that
+        # doesn't expect NA keeps working unchanged.
+        tsd_len <- 0
+        tsds_conf <- 0
+        tsds_motif <- ""
+      }
+      
+      cons <- cons_full   # hand back the FULL, un-sliced consensus; the unchanged
+      # code below does its own substr(cons, cons_s, cons_e)
+      
+      
+      gencounts <- table(gsub(">","",gsub("#.*","",seqs_clust$name)))
+      gencounts <- paste0("#",paste0(c(rbind(names(gencounts),gencounts)),collapse="---"),"#")
+    }  else {
+      cons <- toupper(paste0(unlist(as.character(seqs)), 
+                             collapse = ""))
+    }
+    alll <- nchar(cons)
+    cons <- substr(cons,cons_s,cons_e)
+    cutl <- nchar(cons)
+    cons <- gsub("-","",cons)
+    # cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
+    nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
+                  nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif, "_gens",gencounts,"@@")
+    if ((nchar(cons) >= max(100, opt$min_size)) &
+        (alll-cutl) > 180) {  # Remove clusters that include the edges, they are most likely segdups
+      result <- data.table(name = nam, seq = cons)
+      alim <- data.table(name=names(alim),seq=case_flanks(names(alim), alim))
+      alim[,name:=paste0(">",gsub(">","",name))]
+      wfasta(alim, paste0("../alignments/",substr(make.names(nam),1,36),".maf"))
+      
+    }
+    
+    # wfasta(alim, paste0("../alignments/consensi_", start, "_",
+    #                     end,"-",u, ".maf"))
+    
+    list(consensus = result, file = job$file, rank = job$rank,
+         timing = data.table(win_start = start, win_end = end, set = job$ss, cluster = u,
+                             n_seqs = nrow(seqs_clust), mean_len = round(mean(nchar(seqs_clust$seq))),
+                             max_len = max(nchar(seqs_clust$seq)), aln_len = aln_len,
+                             seconds = round(mafft_s, 2),
+                             total_s = round(as.numeric(difftime(Sys.time(), t_job, units = "secs")), 2),
+                             t_start = round(as.numeric(t_job), 2), t_end = round(as.numeric(Sys.time()), 2),
+                             pid = Sys.getpid()))
+  }
+
+  # Round 2, step 1 (per length window): clusters the segments and returns one job
+  # per cluster to align. The alignment is done per cluster (process_cluster_2), so
+  # that all clusters share the workers instead of each window aligning its own.
   process_zone_2 <- function(zone) {
     start <- as.numeric(zone[1]) - zones_interval_overlap
     end <- as.numeric(zone[2]) + zones_interval_overlap
@@ -948,14 +1411,10 @@ cluster_results <- function() {
     t_win <- Sys.time()
     n_seg <- 0
     cdhit_s <- 0
-    mafft_log <- list()
+    jobs <- list()
     on.exit({
-      if (length(mafft_log) > 0) {
-        fwrite(rbindlist(mafft_log), paste0("timing_mafft_", start, "_", end, ".tsv"), sep = "\t")
-      }
       fwrite(data.table(win_start = start, win_end = end, n_segments = n_seg,
-                        n_alignments = length(mafft_log), cdhit_s = round(cdhit_s, 2),
-                        mafft_s = round(sum(vapply(mafft_log, function(x) x$seconds, 0)), 2),
+                        n_clusters = length(jobs), cdhit_s = round(cdhit_s, 2),
                         total_s = round(as.numeric(difftime(Sys.time(), t_win, units = "secs")), 2),
                         t_start = round(as.numeric(t_win), 2), t_end = round(as.numeric(Sys.time()), 2),
                         pid = Sys.getpid()),
@@ -976,8 +1435,6 @@ cluster_results <- function() {
                                                      (nrow(segment_u) %/%
                                                         opt$max_cluster +1))))
           
-          consensi <- data.table(name = as.character(), 
-                                 seq = as.character())
           for (ss in 1:length(segment_sets)) {
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
@@ -991,465 +1448,18 @@ cluster_results <- function() {
               if ( nrow(sg_clus) > 0) {
                 for (u in unique(sg_clus$clus)) {
                   seqs_clust <- sg[name %in% unlist(sg_clus[clus==u]$name)]
-                  clust_temp <- strsplit(seqs_clust$seq, "")
-                  names(clust_temp) <- seqs_clust$name
-                  seqs <- ape::as.DNAbin(clust_temp)
-                  if (length(seqs) > 1) {
-                    t0 <- Sys.time()
-                    ali <- ips::mafft(seqs,
-                                      #      method = "globalpair",
-                                      #      maxiterate = 2,
-                                      options = c("--adjustdirection"),
-                                      ep = 0.123,
-                                      thread = 1,
-                                      exec = "mafft"
-                    )
-                    nseqs <- length(seqs)
-                    mafft_log[[length(mafft_log) + 1]] <- data.table(
-                      win_start = start, win_end = end, set = ss, cluster = u,
-                      n_seqs = nseqs, mean_len = round(mean(lengths(clust_temp))),
-                      max_len = max(lengths(clust_temp)),
-                      aln_len = if (is.matrix(ali)) ncol(ali) else NA_integer_,
-                      seconds = round(as.numeric(difftime(Sys.time(), t0, units = "secs")), 2),
-                      t_start = round(as.numeric(t0), 2), pid = Sys.getpid())
-                    alim <- reformatDNA(ali)
-                    # cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
-                    #                                             ambiguityMap = "-",
-                    #                                             threshold = cons_threshold))
-                    
-                    ### TSD data
-                    ## ==========================================================================
-                    ## Everything below, down to the "tsd_len/tsds_conf/tsds_motif" assignments,
-                    ## replaces the previous single-pass "consensusMatrix -> stri_locate cons_s/
-                    ## cons_e -> fixed-window tsds2 match count" block. Nothing after this
-                    ## comment needs to change: it still ends by handing back `cons` as the
-                    ## FULL, un-sliced per-column consensus (same length as the alignment,
-                    ## gaps included) plus `cons_s`, `cons_e`, `tsd_len`, `tsds_conf`,
-                    ## `tsds_motif` under their original names, so `alll <- nchar(cons)`,
-                    ## `cons <- substr(cons,cons_s,cons_e)`, and the `nam <- ...` line all work
-                    ## unmodified.
-                    ##
-                    ## `alim` is already the plain character vector reformatDNA() produces (one
-                    ## aligned string per sequence, same length, gaps as "-") - nothing here
-                    ## needs it wrapped in a DNAStringSet except where consensusMatrix/
-                    ## consensusString specifically require one, matching how the original code
-                    ## already called Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim)).
-                    ##
-                    ## Deliberately NOT filtering all-gap columns before building consstring
-                    ## (unlike some earlier drafts of this logic): an all-gap column already
-                    ## fails the saturation check on its own and reads as "0" in consstring, so
-                    ## filtering buys nothing here, and skipping it avoids a coordinate offset
-                    ## between consstring's index and alim's actual column index that filtering
-                    ## would otherwise introduce.
-                    ## ==========================================================================
-                    
-                    cMatrix <- Biostrings::consensusMatrix(Biostrings::DNAStringSet(alim))
-                    dtMatrix <- as.data.table(matrix(unlist(cMatrix), nrow = nrow(cMatrix)))
-                    saturation <- unlist(lapply(dtMatrix[1:4],sum))/nseqs
-                    conserv <- unlist(lapply(dtMatrix[1:4],max))/(saturation*nseqs)
-                    consstring <- paste0(as.numeric(conserv>=conserv_threshold & saturation >= sat_threshold),collapse = "")
-                    cons <- paste0(get_highest_letter(cMatrix[c(1:4,16),], cons_threshold),collapse="")
-                    cons_full <- cons   # the full, un-sliced consensus - `cons` gets reassigned to this
-                    # at the very end so the unchanged code after this block
-                    # still does its own substr(cons, cons_s, cons_e) trim
-                    
-                    get_sequence_value <- function(x) {
-                      ifelse(x == 2, 9,
-                             ifelse(x == 3, 7,
-                                    ifelse(x == 4, 6,
-                                           ifelse(x <= 8, 5,
-                                                  ifelse(x <= 13, 4,
-                                                         ifelse(x <= 20, 3, 2))))))
-                    }
-                    cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,get_sequence_value(nseqs)),collapse =""))[1]
-                    if (is.na(cons_s)) next   # no conserved block: skip this cluster, not the whole window
-                    ## ---- cons_e: end of the same conserved block cons_s belongs to ----------
-                    ## Trivial gaps (<= small_gap columns - ordinary single-base dropouts inside
-                    ## an otherwise solid block) always bridge. Larger gaps only bridge if
-                    ## there's substantial conservation resuming within `lookahead` columns -
-                    ## this tolerates real internal insertions of essentially unbounded length
-                    ## (confirmed necessary on a real LTR-Gypsy element with a ~700bp internal
-                    ## low-conservation stretch) while still rejecting a lone downstream
-                    ## coincidental match (confirmed necessary on a real LINE alignment where an
-                    ## unrelated 6bp conserved stretch sat ~220bp past the true element end).
-                    run_len <- get_sequence_value(nseqs)
-                    lookahead <- 1000
-                    min_cluster_total <- 10
-                    small_gap <- 20
-                    
-                    x <- as.numeric(strsplit(consstring, "")[[1]])
-                    rl <- rle(x)
-                    run_ends   <- cumsum(rl$lengths)
-                    run_starts <- run_ends - rl$lengths + 1
-                    solid <- which(rl$values == 1 & rl$lengths >= run_len)
-                    
-                    j <- match(solid[which(run_starts[solid] <= cons_s & run_ends[solid] >= cons_s)], solid)
-                    cons_e_raw <- run_ends[solid[j]]
-                    while (j < length(solid)) {
-                      gap <- run_starts[solid[j + 1]] - run_ends[solid[j]] - 1
-                      if (gap > small_gap) {
-                        window_end <- run_ends[solid[j]] + lookahead
-                        idx_ahead <- solid[solid > solid[j]]
-                        idx_ahead <- idx_ahead[run_starts[idx_ahead] <= window_end]
-                        total_ahead <- sum(rl$lengths[idx_ahead])
-                        if (total_ahead < min_cluster_total) break
-                      }
-                      j <- j + 1
-                      cons_e_raw <- run_ends[solid[j]]
-                    }
-                    cons_s_raw <- cons_s
-                    
-                    ## ---- Generic, motif-agnostic per-sequence TSD caller --------------------
-                    ## Tests whether each sequence's own left-flank tail matches its own
-                    ## right-flank head, for lengths 2-13. This needs no assumption about what
-                    ## the TSD looks like: a family-fixed motif (Tc1/Mariner's "TA", PiggyBac's
-                    ## "TTAA"), a partially-degenerate motif (CACTA/hAT-style "GTNAC"-type target
-                    ## sites), and a variable-content but fixed-length target (most hAT elements)
-                    ## all show up the same way here - only the aggregate statistics downstream
-                    ## differ.
-                    ##
-                    ## Speed: the caller only ever looks at the K = 13 + 6 bases next to an edge
-                    ## (longest TSD plus largest offset), so per edge position we extract just
-                    ## those bases once, as an nseqs x K matrix, cache it, and score all TSD
-                    ## lengths for all sequences with vectorised comparisons. The motif string
-                    ## (the slow Biostrings call) is built only for the final choice.
-                    ##
-                    ## Null match probability p0: the previous code estimated it from the
-                    ## flank base composition, but counted only upper-case bases while the
-                    ## aligned sequences are lower case, so it was always 0.25. That behaviour
-                    ## is kept (use_local_composition = FALSE). Setting it to TRUE uses the real
-                    ## flank composition, computed from the column counts in cMatrix.
-                    tsd_max <- 13L
-                    off_max <- 6L
-                    K <- tsd_max + off_max
-                    use_local_composition <- TRUE
-                    
-                    tail_cache <- new.env()
-                    head_cache <- new.env()
-                    # Last K ungapped bases before column cs, per sequence (left-padded with NA)
-                    left_tail <- function(cs) {
-                      key <- as.character(cs)
-                      v <- tail_cache[[key]]
-                      if (is.null(v)) {
-                        v <- t(vapply(alim, function(s) {
-                          x <- if (cs > 1) strsplit(gsub("-", "", substr(s, 1, cs - 1)), "")[[1]] else character(0)
-                          x <- tail(x, K)
-                          c(rep(NA_character_, K - length(x)), x)
-                        }, character(K), USE.NAMES = FALSE))
-                        assign(key, v, envir = tail_cache)
-                      }
-                      v
-                    }
-                    # First K ungapped bases after column ce, per sequence (right-padded with NA)
-                    right_head <- function(ce) {
-                      key <- as.character(ce)
-                      v <- head_cache[[key]]
-                      if (is.null(v)) {
-                        v <- t(vapply(alim, function(s) {
-                          x <- strsplit(gsub("-", "", substr(s, ce + 1, nchar(s))), "")[[1]]
-                          x <- head(x, K)
-                          c(x, rep(NA_character_, K - length(x)))
-                        }, character(K), USE.NAMES = FALSE))
-                        assign(key, v, envir = head_cache)
-                      }
-                      v
-                    }
-                    cum_acgt <- t(apply(cMatrix[c("A", "C", "G", "T"), , drop = FALSE], 1, cumsum))
-                    p0_for <- function(cs, ce) {
-                      if (!use_local_composition) return(0.25)
-                      cnt <- (if (cs > 1) cum_acgt[, cs - 1] else 0) + cum_acgt[, ncol(cum_acgt)] - cum_acgt[, ce]
-                      if (sum(cnt) == 0) return(0.25)
-                      sum((cnt / sum(cnt))^2)
-                    }
-                    # Per-sequence best TSD: for each length 2..13, compare the last x bases of the
-                    # left flank with the first x bases of the right flank (after skipping offl/offr
-                    # bases next to the edges), keep lengths with >= 80% identity, and take the
-                    # length with the smallest binomial p-value (first one on ties).
-                    call_tsd_fast <- function(Lt, Rh, offl = 0L, offr = 0L, p0 = 0.25,
-                                              min_len = 2L, min_identity = 0.8) {
-                      n <- nrow(Lt)
-                      max_x <- pmin(tsd_max, rowSums(!is.na(Lt)) - offl, rowSums(!is.na(Rh)) - offr)
-                      best_p <- rep(Inf, n)
-                      best_x <- rep(NA_integer_, n)
-                      for (xx in min_len:tsd_max) {
-                        ok <- max_x >= xx
-                        if (!any(ok)) break
-                        nm <- rowSums(Lt[, (K - offl - xx + 1):(K - offl), drop = FALSE] ==
-                                        Rh[, (offr + 1):(offr + xx), drop = FALSE], na.rm = TRUE)
-                        pv <- stats::pbinom(nm - 1, size = xx, prob = p0, lower.tail = FALSE)
-                        upd <- ok & (nm / xx >= min_identity) & (pv < best_p)
-                        best_p[upd] <- pv[upd]
-                        best_x[upd] <- xx
-                      }
-                      list(tsd_len = best_x, pval = signif(best_p, 3))
-                    }
-                    # Most frequent significant TSD length (longest one on ties), the fraction of ALL
-                    # sequences that agree on it, and which sequences those are.
-                    summarize_tsd <- function(calls, sig_threshold = 0.1) {
-                      sig <- which(!is.na(calls$tsd_len) & calls$pval <= sig_threshold)
-                      if (length(sig) == 0) return(list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0)))
-                      counts <- tabulate(calls$tsd_len[sig], nbins = tsd_max)
-                      modal_len <- max(which(counts == max(counts)))
-                      list(modal_len = modal_len,
-                           modal_conf = round(max(counts) / length(calls$tsd_len), 2),
-                           rows = sig[calls$tsd_len[sig] == modal_len])
-                    }
-                    tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = 2) {
-                      k <- summ$modal_len
-                      if (is.na(k) || length(summ$rows) < min_support) return("")
-                      l_side <- apply(Lt[summ$rows, (K - offl - k + 1):(K - offl), drop = FALSE], 1, paste, collapse = "")
-                      r_side <- apply(Rh[summ$rows, (offr + 1):(offr + k), drop = FALSE], 1, paste, collapse = "")
-                      Biostrings::consensusString(Biostrings::DNAStringSet(c(r_side, l_side)),
-                                                  ambiguityMap = Biostrings::IUPAC_CODE_MAP, shift = 0L, width = NULL)
-                    }
-                    score_candidate <- function(cs, ce) {
-                      p0_try <- p0_for(cs, ce)
-                      calls_try <- call_tsd_fast(left_tail(cs), right_head(ce), p0 = p0_try)
-                      summ_try <- summarize_tsd(calls_try)
-                      list(score = summ_try$modal_conf, calls = calls_try, summary = summ_try, p0 = p0_try)
-                    }
-                    ## ---- Is the agreement between copies more than chance? --------------------
-                    ## A copy "has" a TSD of length L by chance with probability q_L (>= 80% of L
-                    ## positions matching at the null match probability p0): about 1/16 for 2 bp,
-                    ## 1/64 for 3-5 bp, much less for longer ones. The chance that k or more of n
-                    ## copies agree on one length is then binomial. This is a p-value for ONE edge
-                    ## position and ONE length, so it is multiplied by the number of lengths tried
-                    ## and, in the shift search, by the number of edge positions tried. Without
-                    ## that, a 3-copy cluster finds a chance 2 bp "TSD" (2 of 3 copies) somewhere
-                    ## in the ~600 candidates almost every time.
-                    tsd_alpha <- 0.05
-                    tsd_pvalue <- function(summ, p0, n = nseqs, min_identity = 0.8) {
-                      L <- summ$modal_len
-                      if (is.na(L)) return(1)
-                      q <- stats::pbinom(ceiling(min_identity * L - 1e-9) - 1, L, p0, lower.tail = FALSE)
-                      stats::pbinom(length(summ$rows) - 1, n, q, lower.tail = FALSE)
-                    }
-                    
-                    ## ---- Boundary-shift search: is the raw edge actually right? -------------
-                    ## A coincidentally-conserved TSD flanking the true boundary (see caller
-                    ## notes above) is not random flanking DNA - the transposase actively
-                    ## selects and duplicates it - so it can get pulled into, or trimmed out of,
-                    ## the raw conservation-based edge above. Search a small window of
-                    ## independent shifts for cons_s and cons_e, and for each candidate, re-run
-                    ## the TSD caller (which needs no knowledge of what the TSD looks like).
-                    ## Only trust a shift once it clearly beats making no shift at all, and
-                    ## among shifts that do, take the SMALLEST one: a real target motif is
-                    ## often itself a short tandem-repeat unit and TE termini are frequently
-                    ## AT-rich right where the true sequence begins, so several different
-                    ## shifts within that repetitive stretch can score equally well (any
-                    ## even-numbered shift inside a "TATATA..." run still looks like a perfect
-                    ## 2bp match) - there is no well-defined maximum to chase there, and
-                    ## chasing one anyway means sliding arbitrarily deep into real element
-                    ## sequence.
-                    shift_range <- -12:12
-                    min_core <- 20   # never shrink the core below this many columns
-                    baseline <- score_candidate(cons_s_raw, cons_e_raw)
-                    all_results <- list(`0_0` = list(ds = 0, de = 0, cons_s = cons_s_raw, cons_e = cons_e_raw,
-                                                     score = baseline$score, calls = baseline$calls, summary = baseline$summary,
-                                                     p0 = baseline$p0))
-                    for (ds in shift_range) {
-                      cs <- cons_s_raw + ds
-                      if (cs < 1) next
-                      for (de in shift_range) {
-                        ce <- cons_e_raw + de
-                        if (ce > nchar(cons_full) || ce - cs < min_core) next
-                        if (ds == 0 && de == 0) next
-                        cand <- score_candidate(cs, ce)
-                        all_results[[paste(ds, de, sep = "_")]] <- list(ds = ds, de = de, cons_s = cs, cons_e = ce,
-                                                                        score = cand$score, calls = cand$calls, summary = cand$summary,
-                                                                        p0 = cand$p0)
-                      }
-                    }
-                    
-                    adequate_support <- 0.65   # at least ~2/3 of sequences must independently agree on one TSD
-                    # length before a shift is trusted at all
-                    
-                    ## An inward shift turns element columns into flank. A TSD pulled into the raw
-                    ## edge can only account for as many columns as the TSD itself is long, so reject
-                    ## candidates that trim more than that on either side. Without this, the
-                    ## self-complementary core of a TIR (e.g. ...GC|...|GC... inside GGGGGC...GCCCCC)
-                    ## is shared by every copy and scores as a perfect, but false, 2 bp "TSD".
-                    inward_ok <- function(r) {
-                      k <- r$summary$modal_len
-                      !is.na(k) && max(r$ds, 0) <= k && max(-r$de, 0) <= k
-                    }
-                    ## The raw edges come from conservation alone, before any TSD is looked at, so
-                    ## a TSD there is one test (corrected only for the lengths tried). A TSD found
-                    ## by moving the edges is corrected for every edge position tried. Using the
-                    ## full correction at the raw edges too would reject a real 5 bp TSD in a small
-                    ## cluster and accept the exact 4 bp match that a 1 bp shift always produces
-                    ## from it (4 of its 5 bases), growing the element by 1 bp.
-                    n_tests <- length(all_results) * (tsd_max - 1L)     # edge positions x TSD lengths
-                    significant <- function(r) {
-                      m <- if (r$ds == 0 && r$de == 0) tsd_max - 1L else n_tests
-                      tsd_pvalue(r$summary, r$p0) * m <= tsd_alpha
-                    }
-                    eligible <- Filter(function(r) r$score >= adequate_support && inward_ok(r) && significant(r), all_results)
-                    best <- if (length(eligible) == 0) {
-                      all_results[["0_0"]]
-                    } else {
-                      eligible[[which.min(vapply(eligible, function(r) abs(r$ds) + abs(r$de), numeric(1)))]]
-                    }
-                    
-                    ## ---- Cliff-validated extension -------------------------------------------
-                    ## "Smallest adequate shift" avoids drifting into a repeat, but can stop one
-                    ## base short of the true edge: confirmed on a real CACTA-type element
-                    ## where the element's own terminal base coincides with the edge of a 5bp
-                    ## target motif and only the middle 3 bases are actually duplicated - the
-                    ## smallest adequate shift alone found a real but incomplete 2bp match, one
-                    ## base short of a perfect 3bp one. What distinguishes that from a genuine
-                    ## repeat plateau isn't the confidence score (both can be high, even
-                    ## perfect, across several nearby shifts) - it's what happens ONE STEP
-                    ## FURTHER STILL. Past a real, discrete TSD, support collapses sharply
-                    ## (confirmed: 26/26 sequences matching perfectly, one base later 0/26).
-                    ## Inside a repeat, support stays high indefinitely as the match just
-                    ## re-phases against it (confirmed: 6/6 sequences kept matching, just at a
-                    ## shifting length, several bases out). So: only extend the anchor by one
-                    ## step if that step is itself well-supported AND the step immediately
-                    ## beyond it collapses.
-                    collapse_below <- 0.15
-                    directions <- list(c(-1, 0), c(1, 0), c(0, -1), c(0, 1))
-                    extension <- NULL
-                    for (dir in directions) {
-                      step1_ds <- best$ds + dir[1]; step1_de <- best$de + dir[2]
-                      step1 <- all_results[[paste(step1_ds, step1_de, sep = "_")]]
-                      if (is.null(step1) || step1$score < adequate_support || !inward_ok(step1) || !significant(step1)) next
-                      step2_ds <- best$ds + 2 * dir[1]; step2_de <- best$de + 2 * dir[2]
-                      step2_cs <- cons_s_raw + step2_ds; step2_ce <- cons_e_raw + step2_de
-                      step2 <- if (step2_cs >= 1 && step2_ce <= nchar(cons_full) && step2_ce - step2_cs >= min_core) {
-                        cand <- all_results[[paste(step2_ds, step2_de, sep = "_")]]
-                        if (is.null(cand)) score_candidate(step2_cs, step2_ce) else cand
-                      } else {
-                        list(score = 1)   # ran off the end of the sequence - can't confirm a cliff, so don't extend
-                      }
-                      if (step2$score < collapse_below) {
-                        if (is.null(extension) || step1$score > extension$score) extension <- step1
-                      }
-                    }
-                    if (!is.null(extension)) best <- extension
-                    
-                    cons_s <- best$cons_s
-                    cons_e <- best$cons_e
-                    tsd_calls <- best$calls
-                    tsd_summary <- best$summary
-                    Lt <- left_tail(cons_s)
-                    Rh <- right_head(cons_e)
-                    motif_offl <- 0L
-                    motif_offr <- 0L
-                    summary_p0 <- best$p0
-                    
-                    ## ---- Offset-aware refinement (variable-content, fixed-length TSDs) ------
-                    ## The search above only ever tests matches flush against cons_s/cons_e.
-                    ## Some real TSDs sit a few bases IN from the boundary on one side rather
-                    ## than flush against it (confirmed on a real "Unknown" bat repeat where
-                    ## the right-side TSD copy sat 1-4 bases into the flank). This does NOT
-                    ## move cons_s/cons_e - the boundary is already settled above - it only
-                    ## improves what gets reported as the TSD itself.
-                    ##
-                    ## This needs a different bar than the boundary search: a family-fixed
-                    ## motif should show up in nearly every copy, but a variable-content,
-                    ## fixed-length TSD (most hAT-type elements) is a DIFFERENT sequence at
-                    ## every insertion, so only copies that haven't diverged past recognition
-                    ## will still show a detectable match - real signal can legitimately show
-                    ## up in well under half the sequences. Judge by an absolute COUNT of
-                    ## highly-significant, length-consistent matches at a shared offset rather
-                    ## than a majority-fraction threshold, and among offsets clearing that
-                    ## count, take the smallest total offset (same repeat-plateau risk as the
-                    ## boundary search applies here too).
-                    strict_pval <- 0.01
-                    min_strict_count <- 6
-                    p0_final <- p0_for(cons_s, cons_e)
-                    offset_candidates <- list()
-                    for (offl in 0:off_max) {
-                      for (offr in 0:off_max) {
-                        calls_off <- call_tsd_fast(Lt, Rh, offl, offr, p0 = p0_final)
-                        strict <- which(!is.na(calls_off$tsd_len) & calls_off$pval <= strict_pval)
-                        if (length(strict) == 0) next
-                        cnt <- max(tabulate(calls_off$tsd_len[strict], nbins = tsd_max))
-                        if (cnt >= min_strict_count) {
-                          offset_candidates[[paste(offl, offr, sep = "_")]] <- list(
-                            offl = offl, offr = offr, count = cnt, calls = calls_off,
-                            summary = summarize_tsd(calls_off)
-                          )
-                        }
-                      }
-                    }
-                    if (length(offset_candidates) > 0) {
-                      best_offset <- offset_candidates[[which.min(vapply(offset_candidates, function(r) r$offl + r$offr, numeric(1)))]]
-                      baseline_strict_count <- sum(!is.na(tsd_calls$tsd_len) & tsd_calls$pval <= strict_pval)
-                      if (best_offset$count > baseline_strict_count) {
-                        tsd_calls <- best_offset$calls
-                        tsd_summary <- best_offset$summary
-                        motif_offl <- best_offset$offl
-                        motif_offr <- best_offset$offr
-                        summary_p0 <- p0_final
-                      }
-                    }
-                    ## Report a TSD only if the agreement at the final edges is more than chance
-                    ## (one edge position, so corrected only for the number of lengths tried).
-                    ## Otherwise it would still feed the TSD-based reclassification rules.
-                    if (tsd_pvalue(tsd_summary, summary_p0) * (tsd_max - 1L) > tsd_alpha) {
-                      tsd_summary <- list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0))
-                    }
-                    tsd_summary$modal_motif <- tsd_motif(tsd_summary, Lt, Rh, motif_offl, motif_offr)
-                                   
-                    tsd_len    <- tsd_summary$modal_len
-                    tsds_conf  <- tsd_summary$modal_conf
-                    tsds_motif <- tsd_summary$modal_motif
-                    if (is.na(tsd_len)) {
-                      # No significant TSD found at all - fall back to the same degenerate
-                      # "no signal" values the original fixed-window method produced in this
-                      # situation (tsd_len 2, confidence 0), so downstream filename/logic that
-                      # doesn't expect NA keeps working unchanged.
-                      tsd_len <- 0
-                      tsds_conf <- 0
-                      tsds_motif <- ""
-                    }
-                    
-                    cons <- cons_full   # hand back the FULL, un-sliced consensus; the unchanged
-                    # code below does its own substr(cons, cons_s, cons_e)
-                    
-                    
-                    gencounts <- table(gsub(">","",gsub("#.*","",seqs_clust$name)))
-                    gencounts <- paste0("#",paste0(c(rbind(names(gencounts),gencounts)),collapse="---"),"#")
-                  }  else {
-                    cons <- toupper(paste0(unlist(as.character(seqs)), 
-                                           collapse = ""))
-                  }
-                  alll <- nchar(cons)
-                  cons <- substr(cons,cons_s,cons_e)
-                  cutl <- nchar(cons)
-                  cons <- gsub("-","",cons)
-                  # cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
-                  nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
-                                nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif, "_gens",gencounts,"@@")
-                  if ((nchar(cons) >= max(100, opt$min_size)) &
-                      (alll-cutl) > 180) {  # Remove clusters that include the edges, they are most likely segdups
-                    consensi <- rbindlist(list(consensi, data.table(name = nam, 
-                                                                    seq = cons)))
-                    alim <- data.table(name=names(alim),seq=case_flanks(names(alim), alim))
-                    alim[,name:=paste0(">",gsub(">","",name))]
-                    wfasta(alim, paste0("../alignments/",substr(make.names(nam),1,36),".maf"))
-                    
-                  }
-                  
-                  # wfasta(alim, paste0("../alignments/consensi_", start, "_",
-                  #                     end,"-",u, ".maf"))
-                  
+                  jobs[[length(jobs) + 1]] <- list(start = start, end = end, ss = ss, u = u,
+                                                   seqs = seqs_clust, rank = length(jobs) + 1,
+                                                   file = paste0("consensi_", start, "_", end, ".fa"))
                 }
               } 
             }
-          }
-          if (nrow(consensi) > 0) {
-            wfasta(consensi, paste0("consensi_", start, "_",
-                                    end, ".fa"))
-            
           }
         }
       }
     }
     #  lx(paste("Zone:", start, "completed."))
-    return()
+    return(jobs)
   }
   
   zones_interval <- 300
@@ -1490,21 +1500,43 @@ cluster_results <- function() {
     }
     
     #     lx(paste("Processing:", length(zones), "windows"))
-    loop_exit <- mclapply(
+    # Step 1: cluster each window (in parallel); each window returns its clusters as jobs
+    zone_out <- mclapply(
       rev(zones),
       process_zone_2,
       mc.preschedule = FALSE,
       mc.cores = opt$threads
     )
-    lx(paste("Output Loop 2 :", unlist(loop_exit)))
-    # Collect the timing files of all windows
-    for (kind in c("mafft", "win")) {
-      tf <- list.files(pattern = paste0("^timing_", kind, "_"))
-      if (length(tf) > 0) {
-        tt <- rbindlist(lapply(tf, fread))
-        setorder(tt, win_start)
-        fwrite(tt, paste0("../loop2_", ifelse(kind == "win", "window", kind), "_timing.tsv"), sep = "\t")
+    failed <- sum(!vapply(zone_out, function(x) is.null(x) || is.list(x), TRUE))
+    if (failed > 0) lx(paste("WARNING: clustering failed in", failed, "windows"))
+    jobs <- unlist(Filter(is.list, zone_out), recursive = FALSE)
+    lx(paste("Clusters to align:", length(jobs)))
+    if (length(jobs) > 0) {
+      # Step 2: align all clusters (in parallel), largest first so that no long
+      # alignment is left running alone at the end
+      cost <- vapply(jobs, function(j) nrow(j$seqs) * mean(nchar(j$seqs$seq)), 0)
+      jobs <- jobs[order(-cost)]
+      res <- mclapply(jobs, process_cluster_2, mc.preschedule = FALSE, mc.cores = opt$threads)
+      failed <- sum(!vapply(res, is.list, TRUE))
+      if (failed > 0) lx(paste("WARNING: alignment failed for", failed, "clusters"))
+      res <- Filter(is.list, res)
+      # Consensi go to one file per window, in the same order as when each window
+      # aligned its own clusters, so all_consensi.fa is unchanged
+      cons <- rbindlist(lapply(res, function(r) {
+        if (is.null(r$consensus)) NULL else cbind(r$consensus, file = r$file, rank = r$rank)
+      }))
+      if (nrow(cons) > 0) {
+        setorder(cons, file, rank)
+        for (f in unique(cons$file)) wfasta(cons[file == f, .(name, seq)], f)
       }
+      fwrite(rbindlist(lapply(res, `[[`, "timing")), "../loop2_mafft_timing.tsv", sep = "\t")
+    }
+    # Timing of the clustering step, per window
+    tf <- list.files(pattern = "^timing_win_")
+    if (length(tf) > 0) {
+      tt <- rbindlist(lapply(tf, fread))
+      setorder(tt, win_start)
+      fwrite(tt, "../loop2_window_timing.tsv", sep = "\t")
     }
     lx(paste("Loop 2 timing written to loop2_window_timing.tsv and loop2_mafft_timing.tsv"))
     system("cat consen*.fa >> ../all_consensi.fa")
