@@ -69,8 +69,8 @@ read_pars <- function() {
       "lib_name",       "b", 1, "character", "Identifier appended to element names [required]",
       "output_folder",  "o", 1, "character", "Output folder [pantera_output]",
       "threads",        "T", 1, "integer",   "Threads [8, or the number of cores if fewer]",
-      "min_size",       "s", 1, "integer",   "Min length of polymorphic segments [100]",
-      "max_size",       "l", 1, "integer",   "Max length of polymorphic segments [30000]",
+      "min_size",       "s", 1, "integer",   "Min length of a polymorphic insertion, without flanks [50]",
+      "max_size",       "l", 1, "integer",   "Max length of a polymorphic insertion, without flanks [30000]",
       "identity1",      "i", 1, "double",    "Identity for clustering, first round [0.90]",
       "identity2",      "y", 1, "double",    "Identity for clustering, second round [0.85]",
       "min_cluster",    "m", 1, "integer",   "Min sequences to build a consensus [3]",
@@ -129,7 +129,7 @@ read_pars <- function() {
   }
 
   if (is.null(opt$min_size)) {
-    opt$min_size <- 100
+    opt$min_size <- 50
   }
 
   if (is.null(opt$max_size)) {
@@ -310,10 +310,10 @@ kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
 # Reads the two ONEcode files extracted from a 1aln file with svfind
 parseONEview <- function(n) {
   lx(paste("Procesing ", n, " alignments"))
-  ovret <- data.table(name = character(), seq = character())
+  ovret <- data.table(name = character(), seq = character(), lx = numeric(), rx = numeric())
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
-    system2("svfind", args = paste0(" -x 100 -s 50 -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
+    system2("svfind", args = paste0(" -x 100 -s ", min(50, opt$min_size), " -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
     if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
       ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
         if (nrow(ov)>0) {
@@ -323,16 +323,20 @@ parseONEview <- function(n) {
           overhangs <- ov[V1=="Q",2:3][,V2:=as.numeric(V2)]
           flanks <- ov[V1=="F",2:3][,V2:=as.numeric(V2)][,V3:=as.numeric(V3)]
           name <- ov[V1=="I",3]
+          # X: flank bases svfind added on each side of the insertion (up to -x, fewer at contig ends)
+          xflank <- ov[V1=="X",2:3][,V2:=as.numeric(V2)][,V3:=as.numeric(V3)]
           variant <- ov[V1=="V",3:5][,V4:=as.numeric(V4)][,V5:=as.numeric(V5)]
           source <- ov[V1=="B",3:5][,V4:=as.numeric(V4)][,V5:=as.numeric(V5)]
-          ovall <- cbind(file,name,variant[,1:3], source[,1:3],flanks[,1:2], sequences[,1:2], overhangs[,1:2])
-          colnames(ovall) <- c("file","name","v_name", "v_start","v_end","s_name", "s_start","s_end", "flank_l", "flank_r", "seq_len","seq","ov_len","overhang")
+          ovall <- cbind(file,name,variant[,1:3], source[,1:3],flanks[,1:2], sequences[,1:2], overhangs[,1:2], xflank[,1:2])
+          colnames(ovall) <- c("file","name","v_name", "v_start","v_end","s_name", "s_start","s_end", "flank_l", "flank_r", "seq_len","seq","ov_len","overhang", "lx", "rx")
+          # Length of the insertion itself, without the flanks
+          ovall[, ins_len := seq_len - lx - rx]
           ovall[, name:=paste0(genomes[i],"#",v_name,":",v_start,"-",v_end),.I]
           lx(paste("Total segments in 1aln =", nrow(ovall)))
           ## Remove segments that map to the same spot, we remove the last digit to account for small missmatches in the breakpoint
           ovall[,ins_point :=paste0(file,"-",s_name,":",substr(s_start,1,nchar(s_start)-1),"-",substr(s_end,1,nchar(s_end)-1))]
           ovall <- ovall[!(ins_point %in% ovall$ins_point[duplicated(ovall$ins_point)]) ]  
-          ovall <- ovall[seq_len >= opt$min_size & seq_len <= opt$max_size]
+          ovall <- ovall[ins_len >= opt$min_size & ins_len <= opt$max_size]
           lx(paste("Total segments filtered =", nrow(ovall)))
 
           if (opt$debug) {
@@ -362,18 +366,18 @@ parseONEview <- function(n) {
           unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
           # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
           # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
-          ovall[, Ns := nchar(ovall$seq) - nchar(gsub("N", "", ovall$seq))]
+          ovall[, Ns := nchar(seq) - nchar(gsub("N", "", seq, ignore.case = TRUE))]
           ovall <- ovall[Ns <= (nchar(seq) * opt$max_ns)]
           lx(paste("Number of valid Ns segments =", nrow(ovall)))
           ovall[, name := paste0(">", name), .I]
-          ovret <- rbind(ovret, ovall[, c("name", "seq")])
+          ovret <- rbind(ovret, ovall[, c("name", "seq", "lx", "rx")])
         }
       
     }
   }
   # ovret[,name:=paste0(">",.I)]
   ### Trim sequences to leave flanking edges not too long
-  return(ovret[,c("name","seq")])
+  return(ovret)
 }
 
 # Reverse complement of a DNA sequence
@@ -522,13 +526,27 @@ cdhit1 <- function(sequences, threshold) {
   hitcl[,name:=gsub("\\.\\.\\.","",name)]
 } 
 
+# Flank lengths (lx, rx) of segments by name, as reported by svfind.
+# Falls back to 100 (the -x given to svfind) for names not in the table.
+seg_flank_lengths <- function(names) {
+  if (!exists("seg_flanks", envir = globalenv()) || nrow(seg_flanks) == 0) {
+    return(data.table(lx = rep(100, length(names)), rx = rep(100, length(names))))
+  }
+  fl <- seg_flanks[data.table(name = names), on = "name", mult = "first", .(lx, rx)]
+  fl[is.na(lx), lx := 100]
+  fl[is.na(rx), rx := 100]
+  fl
+}
+
 # Calls cdhit with alternative options
 cdhit2 <- function(sequences, threshold) {
   tseqs <- copy(sequences)
   # make.names: sequence names contain the genome path from the list (e.g. "dir/genome.fa"),
   # and a "/" in the temporary file name makes cd-hit fail
   fname <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",tseqs[1]$name), collapse=""))
-  tseqs[,seq:=substr(seq,100,nchar(seq)-100)]
+  # Cluster on the insertions only: remove each segment's own flanks
+  fl <- seg_flank_lengths(tseqs$name)
+  tseqs[, seq := substr(seq, fl$lx + 1, nchar(seq) - fl$rx)]
   wfasta(tseqs[,1:2],fname)
   system(paste0("cd-hit-est -G 0 -A 40 -n 8 -g 1 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
   hitcl <- fread(paste0("cl",fname,".clstr", collapse = ""), fill = T)
@@ -640,6 +658,8 @@ read_poly <- function(ngen) {
     segments_unique[,seq:=toupper(seq)]
     wfasta(segments_unique[, c("name", "seq")],
            paste0(opt$output_folder, "/all_segments.fa"))
+    seg_flanks <<- unique(segments_unique[, .(name, lx, rx)], by = "name")
+    fwrite(seg_flanks, paste0(opt$output_folder, "/all_segments_flanks.tsv"), sep = "\t")
   }
   segments_unique[,len:=nchar(seq)]
   return(segments_unique)  
@@ -728,8 +748,9 @@ find_repeats <- function() {
   lx(paste("Total Unique segments no dups:", nrow(segments_unique)))
   lx(paste("Starting loop:", round))
   lx(paste("Processing:", nrow(segments_unique), "segments"))
-  lx(paste("Largest segment:", max(segments_unique$len)-200))
-  lx(paste("Smallest segment:", min(segments_unique$len)-200))
+  ins_len <- segments_unique$len - rowSums(seg_flank_lengths(segments_unique$name))
+  lx(paste("Largest insertion:", max(ins_len)))
+  lx(paste("Smallest insertion:", min(ins_len)))
   dir.create(paste0("loop_", round), showWarnings = FALSE)
   setwd(paste0("loop_", round))
   z <-
@@ -1390,8 +1411,9 @@ cluster_results <- function() {
     lx(paste("Total Unique segments no dups:", nrow(segments_unique)))
     lx(paste("Starting loop 2"))
     lx(paste("Processing:", nrow(segments_unique), "segments"))
-    lx(paste("Largest segment:", max(segments_unique$len)))
-    lx(paste("Smallest segment:", min(segments_unique$len)-200))
+    ins_len <- segments_unique$len - rowSums(seg_flank_lengths(segments_unique$name))
+    lx(paste("Largest insertion:", max(ins_len)))
+    lx(paste("Smallest insertion:", min(ins_len)))
     dir.create("loop_2", showWarnings = FALSE)
     dir.create("alignments", showWarnings = FALSE)
     setwd("loop_2")
@@ -1843,6 +1865,7 @@ cleanup <- function() {
   unlink("loop_2", recursive = TRUE)
   unlink("orfs.tbl")
   unlink("pantera_lib_0.fa")
+  unlink("all_segments_flanks.tsv")
   unlink("segments_candidates.fa")
   # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
   unlink("temp.orfs")
@@ -1876,6 +1899,7 @@ invisible(tryCatch({init_pantera()}, error = function(err) {
   end_pantera(paste("Initialization error ->",geterrmessage()))
 }))
 
+seg_flanks <- data.table(name = character(), lx = numeric(), rx = numeric())
 segments_unique <- data.table(name = as.character(),
                               seq = as.character())
 

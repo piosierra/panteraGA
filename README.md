@@ -49,8 +49,8 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-b, --lib_name` | required | Identifier appended to element names |
 | `-o, --output_folder` | `pantera_output` | Output folder |
 | `-T, --threads` | 8 (or the number of cores, if fewer) | Threads |
-| `-s, --min_size` | 100 | Min length of polymorphic segments |
-| `-l, --max_size` | 30000 | Max length of polymorphic segments |
+| `-s, --min_size` | 50 | Min length of a polymorphic insertion, without flanks |
+| `-l, --max_size` | 30000 | Max length of a polymorphic insertion, without flanks |
 | `-i, --identity1` | 0.90 | Identity for clustering, first round |
 | `-y, --identity2` | 0.85 | Identity for clustering, second round |
 | `-m, --min_cluster` | 3 | Min sequences to build a consensus |
