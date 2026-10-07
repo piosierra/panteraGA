@@ -65,12 +65,13 @@ only() {  # elements of run 1 not in run 2, with their closest element in run 2
   echo "== Only in $name: $n"
   [ "$n" -gt 0 ] || return 0
   awk -F'\t' '{print ">"$2"\n"$1}' "$T/u" > "$T/u.fa"
-  blastn -query "$T/u.fa" -subject "$fb" -outfmt "6 qseqid sseqid pident length qlen" -max_hsps 1 2>/dev/null |
-    sort -t $'\t' -k1,1 -k4,4nr | awk -F'\t' '!seen[$1]++' > "$T/hits"
+  # Best match per element by bit score; coverage from the query positions aligned
+  blastn -query "$T/u.fa" -subject "$fb" -outfmt "6 qseqid sseqid pident qstart qend bitscore" -max_hsps 1 2>/dev/null |
+    sort -t $'\t' -k1,1 -k6,6gr | awk -F'\t' '!seen[$1]++ {print $1"\t"$2"\t"$3"\t"($5 - $4 + 1)}' > "$T/hits"
   awk -F'\t' '{print $2"\t"$3}' "$T/u" | sort -t $'\t' -k1,1 > "$T/ul"
   sort -t $'\t' -k1,1 "$T/hits" > "$T/hs"
   join -t $'\t' -a1 "$T/ul" "$T/hs" |
-    awk -F'\t' '{ if (NF >= 6) printf "  %-28s %6d bp  closest: %-28s %5.1f%% identity over %5.0f%% of its length\n", $1, $2, $3, $4, 100*$5/$2;
+    awk -F'\t' '{ if (NF >= 5) printf "  %-28s %6d bp  closest: %-28s %5.1f%% identity over %5.0f%% of its length\n", $1, $2, $3, $4, 100*$5/$2;
                   else printf "  %-28s %6d bp  closest: none\n", $1, $2 }'
 }
 only "$A" "$T/a" "$T/b" "$FB"
