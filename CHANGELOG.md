@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Added
-- `-r/--seed` (default 1): runs are reproducible. The TIR test compares each candidate with shuffled copies, and without a fixed seed borderline TIRs could be detected in one run and not in the next. The same data, `-T` and seed now give identical results.
+- `-r/--seed` (default 1): runs are reproducible. The TIR test compares each candidate with shuffled copies, and without a fixed seed borderline TIRs could be detected in one run and not in the next. Each element is tested with random draws seeded from its own sequence and `--seed`, so the same data and seed give identical results, whatever `-T`, and an element's result does not depend on the other elements.
 
 ### Changed
 - Small clusters (< 100 sequences, < 3 kb) are aligned with mafft L-INS-i with at most 2 refinement iterations (option `-I/--align_iterations`). mafft `--auto` gave them up to 1000, which took most of the alignment time (70% in a test on 8 bat genomes). `-I 1000` reproduces the previous alignments. Larger clusters are unchanged.

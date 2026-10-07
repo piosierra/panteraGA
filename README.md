@@ -64,7 +64,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-a, --anno_coverage` | 0.80 | Min fraction of an element covered by a hit, for genome annotation |
 | `-z, --anno_identity` | 0.80 | Min identity of a hit, and min length ratio hit/element, for genome annotation |
 | `-I, --align_iterations` | 2 | Max mafft refinement iterations for clusters of fewer than 100 sequences shorter than 3 kb (L-INS-i). 1000 reproduces mafft `--auto`, much slower |
-| `-r, --seed` | 1 | Random seed. The same data, `-T` and seed give identical results |
+| `-r, --seed` | 1 | Random seed for the TIR test. The same data and seed give identical results, whatever `-T` |
 | `-k, --keep_alignments` | | Keep the FastGA alignments (`.1aln`) |
 | `-d, --debug` | | Keep intermediate files |
 | `-v, --verbose` | | Show log messages on screen |

@@ -84,7 +84,7 @@ read_pars <- function() {
       "anno_coverage",  "a", 1, "double",    "Min fraction of an element covered by a hit, for annotation [0.80]",
       "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
       "align_iterations","I", 1, "integer",  "Max mafft refinement iterations for clusters of < 100 sequences < 3 kb; 1000 = mafft --auto [2]",
-      "seed",           "r", 1, "integer",   "Random seed; the same data, -T and seed give the same results [1]",
+      "seed",           "r", 1, "integer",   "Random seed for the TIR test; the same data and seed give the same results [1]",
       "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
       "debug",          "d", 0, "logical",   "Keep intermediate files",
       "verbose",        "v", 0, "logical",   "Show log messages on screen",
@@ -451,6 +451,14 @@ sw_anchored <- function(a, b, max_start = 10, match = 2, mismatch = -3, gap = 5)
        end_a = bi, end_b = bj)
 }
 
+# Integer seed for an element's random draws, from its sequence and --seed: the same
+# sequence and seed always give the same draws, whatever other elements there are.
+seq_seed <- function(s) {
+  v <- as.numeric(utf8ToInt(s))
+  base <- if (exists("opt", envir = globalenv())) get("opt", envir = globalenv())$seed else 1
+  as.integer((sum(v * ((seq_along(v) - 1) %% 9973 + 1)) + base * 1000003) %% 2147483647)
+}
+
 # Terminal inverted repeat finder for degraded TIRs.
 # Aligns the first `win` bp with the reverse complement of the last `win` bp, allowing the
 # alignment to start only within `max_gap` bp of both ends, and tests its score against
@@ -466,6 +474,12 @@ find_terminal_tir <- function(s, win = 50, max_gap = 10, n_null = 100, min_len =
   if (hit$score <= 0 || len < min_len)
     return(data.table(tir_len = 0, tir_lgap = NA_real_, tir_rgap = NA_real_, tir_p = 1))
   lchars <- strsplit(left, "")[[1]]
+  # The shuffles are seeded from this element's own sequence (and --seed), so its
+  # result does not depend on the other elements, their order or -T
+  old_seed <- get0(".Random.seed", envir = globalenv(), inherits = FALSE)
+  on.exit(if (is.null(old_seed)) rm(".Random.seed", envir = globalenv())
+          else assign(".Random.seed", old_seed, envir = globalenv()))
+  set.seed(seq_seed(s))
   null <- replicate(n_null, sw_anchored(paste(sample(lchars), collapse = ""), right,
                                         max_start = max_gap)$score)
   data.table(tir_len = len, tir_lgap = hit$start_a - 1, tir_rgap = hit$start_b - 1,
@@ -2035,9 +2049,9 @@ invisible(tryCatch({init_pantera()}, error = function(err) {
   end_pantera(paste("Initialization error ->",geterrmessage()))
 }))
 
-# Reproducible runs. With this generator, mclapply gives each parallel task its
-# own random stream derived from the seed, so the same data, -T and seed always
-# give the same results (the TIR test uses shuffled sequences).
+# Reproducible runs. The TIR test seeds each element from its own sequence and
+# --seed (seq_seed); this generator also gives any other random draw in a
+# parallel task its own reproducible stream.
 RNGkind("L'Ecuyer-CMRG")
 set.seed(opt$seed)
 
