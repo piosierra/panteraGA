@@ -1,5 +1,5 @@
 #!/usr/bin/env Rscript
-# Summarises the loop 2 timing files written by panteraGA.
+# Summarises the loop 2 timing files that panteraGA writes when run with -d.
 #   Rscript scripts/loop2_timing_summary.R <output folder> [threads used]
 # Loop 2 has two steps: clustering per length window (loop2_window_timing.tsv),
 # then alignment and consensus per cluster (loop2_mafft_timing.tsv).

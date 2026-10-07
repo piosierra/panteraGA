@@ -3,10 +3,14 @@
 ## [Unreleased]
 
 ### Added
+- Checks before aligning: every genome in the list must exist and appear only once. The run stops if FastGA produces no alignment for a pair.
+- With `-d`, loop 2 writes timing files per window and per alignment (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`); `scripts/loop2_timing_summary.R` summarises them.
 - Option `-I/--align_iterations`: maximum mafft refinement iterations for small clusters (< 100 sequences, < 3 kb), which mafft `--auto` aligns with L-INS-i and up to 1000 iterations. The default (1000) keeps those alignments unchanged. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi slightly, and a few short elements are gained or lost.
 - `-r/--seed` (default 1): runs are reproducible. The TIR test compares each candidate with shuffled copies, and without a fixed seed borderline TIRs could be detected in one run and not in the next. Each element is tested with random draws seeded from its own sequence and `--seed`, so the same data and seed give identical results, whatever `-T`, and an element's result does not depend on the other elements.
 
 ### Changed
+- The run stops with an error when any parallel task fails (an R error, or a worker that ends without a result, for example killed for using too much memory), naming the step and the first failing window or cluster. Failed tasks used to be skipped silently, losing their segments or clusters.
+- Loop 2 clusters each length window, then aligns all clusters as separate parallel tasks, largest first. Previously each window aligned its own clusters one after another, which left a few windows running alone at the end. Same results; loop 2 took about 40% less time on 8 genomes with 8 threads, and now scales with `-T`.
 - mafft is called directly instead of through the R package ips, which is no longer a dependency (it brought 38 other R packages). Alignments are identical.
 - In the alignment files (`alignments/*.maf`), each copy shows its flanks in lowercase and the insertion itself in uppercase. The library and the stats are not affected.
 

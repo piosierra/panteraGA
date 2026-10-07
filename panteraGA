@@ -742,6 +742,38 @@ read_poly <- function(ngen) {
   return(segments_unique)  
 }  
 
+# Stops the run if any parallel task failed: an R error, or a worker that ended
+# without a result (for example killed for using too much memory). Every task
+# returns a non-NULL value, so NULL means it did not finish.
+# labels: optional description of each task, to name the first failure.
+check_tasks <- function(res, what, labels = NULL) {
+  bad <- which(vapply(res, function(x) is.null(x) || inherits(x, "try-error"), TRUE))
+  if (length(bad) > 0) {
+    first <- res[[bad[1]]]
+    msg <- if (inherits(first, "try-error")) trimws(as.character(first))
+           else "the worker stopped without a result (out of memory?)"
+    where <- if (!is.null(labels)) paste0(" (", labels[bad[1]], ")") else ""
+    end_pantera(paste0(what, ": ", length(bad), " of ", length(res),
+                       " parallel tasks failed. First failure", where, ": ", msg))
+  }
+  invisible(res)
+}
+
+# Runs FastGA on two genomes and stops the run if no alignment was produced
+run_fastga <- function(i, a, b, tempf) {
+  aln <- paste0(opt$output_folder, "/pantera", i, ".1aln")
+  lx(paste0("Aligning ", gsub(".*/", "", a), " <-> ", gsub(".*/", "", b)))
+  if (!file.exists(aln)) {
+    dir.create(tempf, showWarnings = FALSE)
+    status <- system(paste0("FastGA -1:", opt$output_folder, "/pantera", i, " -P", tempf, " ", a, " ", b))
+    unlink(tempf, recursive = TRUE)
+    if (status != 0 || !file.exists(aln) || file.size(aln) == 0) {
+      unlink(aln)
+      end_pantera(paste0("FastGA failed aligning ", a, " and ", b, " (exit status ", status, ")"))
+    }
+  }
+}
+
 # Make alignments with FastGA
 make_alignments <- function(glist) {
   # Check if file exists
@@ -754,22 +786,19 @@ make_alignments <- function(glist) {
   if (lgenomes<2) {
     end_pantera(paste0("At least two genomes needed in ", glist))
   }
+  missing <- genomes[!file.exists(genomes)]
+  if (length(missing) > 0) {
+    end_pantera(paste0("Genome file(s) in ", glist, " not found: ", paste(missing, collapse = ", ")))
+  }
+  dups <- unique(genomes[duplicated(genomes)])
+  if (length(dups) > 0) {
+    end_pantera(paste0("Genome(s) listed more than once in ", glist, ": ", paste(dups, collapse = ", ")))
+  }
   tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
-  
-  for (i in 1:(lgenomes-1)) {
-    dir.create(tempf, showWarnings = F)
-    lx(paste0("Aligning ", gsub(".*/","",genomes[i]), " <-> ", gsub(".*/","",genomes[i+1]) ))
-    if (!file.exists(paste0(opt$output_folder,"/pantera",i,".1aln"))) {
-      system(paste0("FastGA -1:",opt$output_folder,"/pantera",i," -P",tempf," ", genomes[i]," ", genomes[i+1]))
-    }
-    unlink(tempf, recursive = T)
+  # Ring of pairwise alignments: 1 vs 2, 2 vs 3, ..., last vs 1
+  for (i in 1:lgenomes) {
+    run_fastga(i, genomes[i], genomes[if (i < lgenomes) i + 1 else 1], tempf)
   }
-  dir.create(tempf, showWarnings = F)
-  lx(paste0("Aligning ", gsub(".*/","",genomes[lgenomes]), " <-> ", gsub(".*/","",genomes[1]) ))
-  if (!file.exists(paste0(opt$output_folder,"/pantera",lgenomes,".1aln"))) {
-    system(paste0("FastGA -1:",opt$output_folder,"/pantera",lgenomes," -P",tempf," ", genomes[lgenomes]," ", genomes[1]))
-  }
-  unlink(tempf, recursive = T)
   return(lgenomes)
 }
 
@@ -849,10 +878,12 @@ find_repeats <- function() {
   lx(paste("Processing:", length(zones), "windows"))
   loop_exit <- mclapply(
     rev(zones),
-    process_zone,
+    function(z) { process_zone(z); TRUE },
     mc.preschedule = FALSE,
     mc.cores = opt$threads
   )
+  check_tasks(loop_exit, "Loop 1",
+              vapply(rev(zones), function(z) paste0("window ", z[1], "-", z[2]), ""))
   
  # lx(paste("Total sequences discarded:", sum(as.numeric(unlist(loop_exit)))))
   system(paste0("mv ../all_segments.fa ../pantera_lib_", round - 1, ".fa"))
@@ -1464,7 +1495,7 @@ cluster_results <- function() {
     n_seg <- 0
     cdhit_s <- 0
     jobs <- list()
-    on.exit({
+    on.exit(if (opt$debug) {
       fwrite(data.table(win_start = start, win_end = end, n_segments = n_seg,
                         n_clusters = length(jobs), cdhit_s = round(cdhit_s, 2),
                         total_s = round(as.numeric(difftime(Sys.time(), t_win, units = "secs")), 2),
@@ -1559,9 +1590,9 @@ cluster_results <- function() {
       mc.preschedule = FALSE,
       mc.cores = opt$threads
     )
-    failed <- sum(!vapply(zone_out, function(x) is.null(x) || is.list(x), TRUE))
-    if (failed > 0) lx(paste("WARNING: clustering failed in", failed, "windows"))
-    jobs <- unlist(Filter(is.list, zone_out), recursive = FALSE)
+    check_tasks(zone_out, "Loop 2 clustering",
+                vapply(rev(zones), function(z) paste0("window ", z[1], "-", z[2]), ""))
+    jobs <- unlist(zone_out, recursive = FALSE)
     lx(paste("Clusters to align:", length(jobs)))
     if (length(jobs) > 0) {
       # Step 2: align all clusters (in parallel), largest first so that no long
@@ -1569,9 +1600,9 @@ cluster_results <- function() {
       cost <- vapply(jobs, function(j) nrow(j$seqs) * mean(nchar(j$seqs$seq)), 0)
       jobs <- jobs[order(-cost)]
       res <- mclapply(jobs, process_cluster_2, mc.preschedule = FALSE, mc.cores = opt$threads)
-      failed <- sum(!vapply(res, is.list, TRUE))
-      if (failed > 0) lx(paste("WARNING: alignment failed for", failed, "clusters"))
-      res <- Filter(is.list, res)
+      check_tasks(res, "Loop 2 alignment",
+                  vapply(jobs, function(j) paste0("window ", j$start, "-", j$end, ", cluster ", j$u,
+                                                  ", ", nrow(j$seqs), " sequences"), ""))
       # Consensi go to one file per window, in the same order as when each window
       # aligned its own clusters, so all_consensi.fa is unchanged
       cons <- rbindlist(lapply(res, function(r) {
@@ -1581,16 +1612,18 @@ cluster_results <- function() {
         setorder(cons, file, rank)
         for (f in unique(cons$file)) wfasta(cons[file == f, .(name, seq)], f)
       }
-      fwrite(rbindlist(lapply(res, `[[`, "timing")), "../loop2_mafft_timing.tsv", sep = "\t")
+      if (opt$debug) {
+        fwrite(rbindlist(lapply(res, `[[`, "timing")), "../loop2_mafft_timing.tsv", sep = "\t")
+      }
     }
-    # Timing of the clustering step, per window
+    # Timing of the clustering step, per window (only with -d)
     tf <- list.files(pattern = "^timing_win_")
-    if (length(tf) > 0) {
+    if (opt$debug && length(tf) > 0) {
       tt <- rbindlist(lapply(tf, fread))
       setorder(tt, win_start)
       fwrite(tt, "../loop2_window_timing.tsv", sep = "\t")
+      lx(paste("Loop 2 timing written to loop2_window_timing.tsv and loop2_mafft_timing.tsv"))
     }
-    lx(paste("Loop 2 timing written to loop2_window_timing.tsv and loop2_mafft_timing.tsv"))
     system("cat consen*.fa >> ../all_consensi.fa")
     setwd("..")
   }
@@ -1714,7 +1747,9 @@ stats_tes <- function() {
   setwd(temp)
   lente <- nchar(tes$seq)
   tes$lente <- lente
-  orfs_tes <- rbindlist(mclapply(tes$seq, three_orfs, mc.cores = opt$threads))
+  orfs_res <- mclapply(tes$seq, three_orfs, mc.cores = opt$threads)
+  check_tasks(orfs_res, "ORF search", tes$name)
+  orfs_tes <- rbindlist(orfs_res)
   tes <- cbind(tes, orfs_tes)
   lx(paste("Flipping", nrow(tes[strand == "-"]), "sequences"))
   tes[, flipped := strand == "-"]
@@ -1871,7 +1906,9 @@ stats_tes <- function() {
     tes[, c("length", "lgap", "rgap") := lapply(.SD, as.numeric), .SDcols = c("length", "lgap", "rgap")]
     cand <- tes[, which(is.na(type) | lgap >= 10 | rgap >= 10)]
     if (length(cand) > 0) {
-      tir_res <- rbindlist(mclapply(tes$seq[cand], find_terminal_tir, mc.cores = opt$threads))
+      tir_res <- mclapply(tes$seq[cand], find_terminal_tir, mc.cores = opt$threads)
+      check_tasks(tir_res, "TIR search", tes$name[cand])
+      tir_res <- rbindlist(tir_res)
       sig <- which(tir_res$tir_p <= 0.01)
       if (length(sig) > 0) {
         tes[cand[sig], `:=`(type = "TIR", length = tir_res$tir_len[sig],

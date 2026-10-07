@@ -66,7 +66,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-I, --align_iterations` | 1000 | Max mafft refinement iterations (L-INS-i) for clusters of fewer than 100 sequences shorter than 3 kb; 1000 is what mafft `--auto` uses. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi: in that test about 20% differed slightly and a few short elements were gained or lost |
 | `-r, --seed` | 1 | Random seed for the TIR test. The same data and seed give identical results, whatever `-T` |
 | `-k, --keep_alignments` | | Keep the FastGA alignments (`.1aln`) |
-| `-d, --debug` | | Keep intermediate files |
+| `-d, --debug` | | Keep intermediate files, and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
 | `-V, --version` | | Show the version and exit |
 | `-h, --help` | | Show the options and exit |
