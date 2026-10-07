@@ -3,10 +3,10 @@
 ## [Unreleased]
 
 ### Added
+- Option `-I/--align_iterations`: maximum mafft refinement iterations for small clusters (< 100 sequences, < 3 kb), which mafft `--auto` aligns with L-INS-i and up to 1000 iterations. The default (1000) keeps those alignments unchanged. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi slightly, and a few short elements are gained or lost.
 - `-r/--seed` (default 1): runs are reproducible. The TIR test compares each candidate with shuffled copies, and without a fixed seed borderline TIRs could be detected in one run and not in the next. Each element is tested with random draws seeded from its own sequence and `--seed`, so the same data and seed give identical results, whatever `-T`, and an element's result does not depend on the other elements.
 
 ### Changed
-- Small clusters (< 100 sequences, < 3 kb) are aligned with mafft L-INS-i with at most 2 refinement iterations (option `-I/--align_iterations`). mafft `--auto` gave them up to 1000, which took most of the alignment time (70% in a test on 8 bat genomes). `-I 1000` reproduces the previous alignments. Larger clusters are unchanged.
 - mafft is called directly instead of through the R package ips, which is no longer a dependency (it brought 38 other R packages). Alignments are identical.
 - In the alignment files (`alignments/*.maf`), each copy shows its flanks in lowercase and the insertion itself in uppercase. The library and the stats are not affected.
 
