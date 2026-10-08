@@ -1,5 +1,5 @@
 {% set name = "panteraga" %}
-{% set version = "1.3.0" %}
+{% set version = "1.3.1" %}
 
 package:
   name: {{ name }}
@@ -7,7 +7,7 @@ package:
 
 source:
   - url: https://github.com/piosierra/panteraGA/archive/refs/tags/v{{ version }}.tar.gz
-    sha256: 423783360b1c30064927c044a2292442acd42c444bfe4c1b86d810100c89c998
+    sha256: 086b30645f19ab1675fac588ed46bd8437c7293b5e53093ae2b5185d41ffaaa0
   - url: https://zenodo.org/records/22990589/files/model.tar.gz
     sha256: 51c7cfed52a94428e0b8f5f0777b4a77d4be839004667c4047c727d65685aa2e
     folder: zenodo_model
@@ -23,7 +23,6 @@ requirements:
     - r-base >=4.1
     - r-getopt
     - r-codetools
-    - r-ips
     - r-ape
     - r-stringi
     - r-data.table

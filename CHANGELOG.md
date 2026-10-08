@@ -1,9 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Checks before aligning: every genome in the list must exist and appear only once. The run stops if FastGA produces no alignment for a pair.
+- With `-d`, loop 2 writes timing files per window and per alignment (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`); `scripts/loop2_timing_summary.R` summarises them.
+- Option `-I/--align_iterations`: maximum mafft refinement iterations for small clusters (< 100 sequences, < 3 kb), which mafft `--auto` aligns with L-INS-i and up to 1000 iterations. The default (1000) keeps those alignments unchanged. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi slightly, and a few short elements are gained or lost.
+- `-r/--seed` (default 1): runs are reproducible. The TIR test compares each candidate with shuffled copies, and without a fixed seed borderline TIRs could be detected in one run and not in the next. Each element is tested with random draws seeded from its own sequence and `--seed`, so the same data and seed give identical results, whatever `-T`, and an element's result does not depend on the other elements.
+
+### Changed
+- The run stops with an error when any parallel task fails (an R error, or a worker that ends without a result, for example killed for using too much memory), naming the step and the first failing window or cluster. Failed tasks used to be skipped silently, losing their segments or clusters.
+- Loop 2 clusters each length window, then aligns all clusters as separate parallel tasks, largest first. Previously each window aligned its own clusters one after another, which left a few windows running alone at the end. Same results; loop 2 took about 40% less time on 8 genomes with 8 threads, and now scales with `-T`.
+- mafft is called directly instead of through the R package ips, which is no longer a dependency (it brought 38 other R packages). Alignments are identical.
+- In the alignment files (`alignments/*.maf`), each copy shows its flanks in lowercase and the insertion itself in uppercase. The library and the stats are not affected.
+
+### Fixed
+- Cluster members could be silently lost when reading cd-hit's cluster files, if the lines R sampled to guess the file's columns held only single-sequence clusters (shown as the R warning "Stopped early ... Expected 3 fields but found 4"). Clusters could then fall below `-m` and be discarded. The files are now read line by line. This affected all earlier versions.
+- `-s/--min_size` and `-l/--max_size` now apply to the insertion itself. They were applied to the insertion plus its 200 bp of flanks, so `-s 100` let through insertions from 50 bp (the minimum passed to svfind). The default `-s` is now 50, which keeps the same segments as before; values below 50 are also passed to svfind. Consensus sequences must still be at least 100 bp long (or `-s`, if larger), as before.
+- The flanks removed before clustering are the exact ones reported by svfind (its `X` line) instead of a fixed 100 bp per side, which also left 1 flank base on each side.
+- `-n/--max_ns` had no effect: Ns were counted in uppercase on sequences that are still lowercase at that point. (With current FastGA versions segments contain no Ns, so results do not change.)
+- The "Largest/Smallest insertion" log lines report the insertion length (previously "segment", with the round 2 values inconsistent).
+
 ## [1.3.1]
 
 ### Fixed
 - When the genome list gave files with a folder (e.g. `genomes/sp1.fa` or an absolute path), clustering failed in most length windows and those segments were silently lost; typically all polymorphisms shorter than ~1.5 kb. Genome lists with plain file names were not affected.
+### Changed
+- The `name` column of `*-pantera-final.stats.tsv` no longer starts with `>`, so it matches the element names directly.
 
 ## [1.3.0]
 

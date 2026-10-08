@@ -49,8 +49,8 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-b, --lib_name` | required | Identifier appended to element names |
 | `-o, --output_folder` | `pantera_output` | Output folder |
 | `-T, --threads` | 8 (or the number of cores, if fewer) | Threads |
-| `-s, --min_size` | 100 | Min length of polymorphic segments |
-| `-l, --max_size` | 30000 | Max length of polymorphic segments |
+| `-s, --min_size` | 50 | Min length of a polymorphic insertion, without flanks |
+| `-l, --max_size` | 30000 | Max length of a polymorphic insertion, without flanks |
 | `-i, --identity1` | 0.90 | Identity for clustering, first round |
 | `-y, --identity2` | 0.85 | Identity for clustering, second round |
 | `-m, --min_cluster` | 3 | Min sequences to build a consensus |
@@ -63,8 +63,10 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-q, --flank_quantile` | 0.05 | Without `-f`: fraction of segments with the shortest flanks to discard |
 | `-a, --anno_coverage` | 0.80 | Min fraction of an element covered by a hit, for genome annotation |
 | `-z, --anno_identity` | 0.80 | Min identity of a hit, and min length ratio hit/element, for genome annotation |
+| `-I, --align_iterations` | 1000 | Max mafft refinement iterations (L-INS-i) for clusters of fewer than 100 sequences shorter than 3 kb; 1000 is what mafft `--auto` uses. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi: in that test about 20% differed slightly and a few short elements were gained or lost |
+| `-r, --seed` | 1 | Random seed for the TIR test. The same data and seed give identical results, whatever `-T` |
 | `-k, --keep_alignments` | | Keep the FastGA alignments (`.1aln`) |
-| `-d, --debug` | | Keep intermediate files |
+| `-d, --debug` | | Keep intermediate files, and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
 | `-V, --version` | | Show the version and exit |
 | `-h, --help` | | Show the options and exit |
@@ -78,7 +80,7 @@ In the output folder:
 | `mylib-pantera-final.fa` | All TE consensus sequences |
 | `mylib-pantera-final-pass.fa` | Only the elements that pass the structural checks |
 | `mylib-pantera-final.stats.tsv` | Per element: length, class, pass, cluster size, TSD, terminal repeats, tails, copies per genome... |
-| `alignments/` | The alignment (`.maf`) behind each consensus, named as the element |
+| `alignments/` | The alignment (`.maf`) behind each consensus, named as the element. Each copy shows its flanks in lowercase and the insertion in uppercase |
 | `annotations/` | A BED file per genome with the copies of each element |
 | `pantera.log` | Log of the run |
 
