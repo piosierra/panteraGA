@@ -56,7 +56,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-y, --identity2` | 0.85 | Identity for clustering, second round (0.8 to 1) |
 | `-m, --min_cluster` | 3 | Min sequences to build a consensus |
 | `-u, --max_cluster` | 300 | Max sequences per cluster, first round (the second round uses 1000) |
-| `-e, --min_copies` | 2 | Min copies in at least one genome for an element to pass |
+| `-e, --min_copies` | 2 | Min copies in at least one genome for an element to be accepted |
 | `-n, --max_ns` | 0.001 | Max fraction of Ns in a segment |
 | `-c, --max_cons_ns` | 0.02 | Max fraction of Ns in a final consensus |
 | `-p, --min_polya` | 10 | Min length of a polyA tail |
@@ -78,14 +78,14 @@ In the output folder:
 
 | File | Content |
 |---|---|
-| `mylib-pantera-final.fa` | All TE consensus sequences |
-| `mylib-pantera-final-pass.fa` | Only the elements that pass the structural checks |
-| `mylib-pantera-final.stats.tsv` | Per element: length, class, pass, cluster size, TSD, terminal repeats, tails, copies per genome... |
+| `mylib-pantera-final.fa` | The library: the TE consensus sequences accepted by the structural checks |
+| `mylib-pantera-rejected.fa` | The consensus sequences rejected by the checks |
+| `mylib-pantera-final.stats.tsv` | Per element, accepted or rejected: length, class, `pass` and the `reason` (the rule that accepted or rejected it), cluster size, TSD, terminal repeats, tails, copies per genome... |
 | `alignments/` | The alignment (`.maf`) behind each consensus, named as the element. Each copy shows its flanks in lowercase and the insertion in uppercase |
-| `annotations/` | A BED file per genome with the copies of each element |
+| `annotations/` | A BED file per genome with the copies of each accepted element |
 | `pantera.log` | Log of the run |
 
-Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within each class.
+Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within each class (accepted and rejected elements share the numbering).
 
 ## Citation
 

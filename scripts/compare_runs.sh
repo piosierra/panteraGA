@@ -4,7 +4,8 @@
 #   scripts/compare_runs.sh <run A folder> <run B folder> <library name (-b)>
 #
 # Reports processing time (after the FastGA alignments), loop 2 time when the
-# timing files exist, element and pass counts, classes, which consensus sequences
+# timing files exist, element and accepted counts, and for the accepted libraries:
+# classes, which consensus sequences
 # are shared, elements whose class changed, and, for each element found in only
 # one run, its closest element in the other run (blastn). blastn must be on the
 # PATH (e.g. PATH=~/miniconda/envs/pantera/bin:$PATH).
@@ -15,8 +16,12 @@ if [ $# -ne 3 ]; then
   exit 1
 fi
 A=$1; B=$2; LIB=$3
-FA="$A/$LIB-pantera-final.fa"; FB="$B/$LIB-pantera-final.fa"
-for f in "$FA" "$FB"; do [ -s "$f" ] || { echo "Missing $f" >&2; exit 1; }; done
+# Accepted library of a run: -pantera-final.fa since 1.5.0 (rejected elements in
+# -pantera-rejected.fa); before, -pantera-final-pass.fa (and -final.fa held all)
+accepted() { if [ -e "$1/$LIB-pantera-rejected.fa" ]; then echo "$1/$LIB-pantera-final.fa"; else echo "$1/$LIB-pantera-final-pass.fa"; fi; }
+nall() { if [ -e "$1/$LIB-pantera-rejected.fa" ]; then cat "$1/$LIB-pantera-final.fa" "$1/$LIB-pantera-rejected.fa" | grep -c '>'; else grep -c '>' "$1/$LIB-pantera-final.fa"; fi; }
+FA=$(accepted "$A"); FB=$(accepted "$B")
+for f in "$FA" "$FB"; do [ -e "$f" ] || { echo "Missing $f" >&2; exit 1; }; done
 command -v blastn >/dev/null || { echo "blastn not found on the PATH" >&2; exit 1; }
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 
@@ -39,10 +44,10 @@ fi
 
 echo "== Elements"
 for d in "$A" "$B"; do
-  echo "  $d: $(grep -c '>' "$d/$LIB-pantera-final.fa") elements, $(grep -c '>' "$d/$LIB-pantera-final-pass.fa") pass"
+  echo "  $d: $(nall "$d") elements, $(grep -c '>' "$(accepted "$d")") accepted"
 done
 
-echo "== Classes ($A | $B)"
+echo "== Classes of accepted elements ($A | $B)"
 grep '>' "$FA" | sed 's/.*#//' | sort | uniq -c | awk '{print $2"\t"$1}' | sort > "$T/ca"
 grep '>' "$FB" | sed 's/.*#//' | sort | uniq -c | awk '{print $2"\t"$1}' | sort > "$T/cb"
 join -t $'\t' -a1 -a2 -e 0 -o 0,1.2,2.2 "$T/ca" "$T/cb" |

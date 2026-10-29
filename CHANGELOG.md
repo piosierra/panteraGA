@@ -2,7 +2,12 @@
 
 ## [Unreleased]
 
+### Changed
+- Output: `<lib>-pantera-final.fa` is now the library of accepted elements only, and the rejected ones are written to `<lib>-pantera-rejected.fa`. `<lib>-pantera-final-pass.fa` is no longer written (its content is now `-final.fa`). The stats file still lists every element, accepted or rejected. The genome annotation (`annotations/`) uses only the accepted elements. Element names and numbering are unchanged.
+- `scripts/compare_runs.sh` compares the accepted libraries, for runs of this and earlier versions.
+
 ### Added
+- Stats file: column `reason`, after `pass`: the rule that accepted or rejected the element (the last rule that decided, since rules run in order and later ones overwrite earlier ones).
 - Stats file: column `TSD_pvalue`, after `TSD_motif`: the p-value of the reported TSD (agreement between copies beyond chance, corrected for the TSD lengths tried). Empty when no TSD is reported. The consensus names in intermediate files carry it as `_tsdp`.
 
 ### Fixed

@@ -184,7 +184,7 @@ read_pars <- function() {
       "identity2",      "y", 1, "double",    "Identity for clustering, second round, 0.8-1 [0.85]",
       "min_cluster",    "m", 1, "integer",   "Min sequences to build a consensus [3]",
       "max_cluster",    "u", 1, "integer",   "Max sequences per cluster, first round [300]",
-      "min_copies",     "e", 1, "integer",   "Min copies in at least one genome for an element to pass [2]",
+      "min_copies",     "e", 1, "integer",   "Min copies in at least one genome for an element to be accepted [2]",
       "max_ns",         "n", 1, "double",    "Max fraction of Ns in a segment [0.001]",
       "max_cons_ns",    "c", 1, "double",    "Max fraction of Ns in a final consensus [0.02]",
       "min_polya",      "p", 1, "integer",   "Min length of a polyA tail [10]",
@@ -2023,7 +2023,10 @@ stats_tes <- function(final, genomes) {
     # Remove the dups detected
     tes <- tes[!(name %in% dups_list)]
     lx(paste("Removed dups:", length(unique(dups_list))))
-    tes[, pass := F]
+    # Every rule that accepts or rejects an element also records why (stats: reason).
+    # Rules run in order and later ones overwrite earlier ones, so the reason is the
+    # last rule that decided.
+    tes[, `:=`(pass = F, reason = "no rule accepts it")]
     tes[, sf := gsub(".*#", "", name), by = .I]
     
     ### Terminal inverted repeats (replaces the old short_tir heuristic).
@@ -2044,53 +2047,58 @@ stats_tes <- function(final, genomes) {
       lx(paste("Terminal TIRs detected:", length(sig), "of", length(cand), "elements checked"))
     }
     
-    tes[name %in% good_line[!(good_line %in% small_line)], pass := T]
-    tes[grepl("DIRS", name) & (orf1 > rules_cfg$dirs_min_orf) & (lente < rules_cfg$dirs_max_len), pass := T]
-    tes[grepl("Crypton", name), pass := T]
-    tes[grepl("#PLE", name), pass := T]
-    tes[grepl("#SINE", name) & lente < rules_cfg$sine_max_len, pass := T]
-    tes[name %in% good_ltr, pass := T]
-    tes[name %in% ltr_reco$new, pass := T]
-    tes[name %in% good_tir, pass := T]
+    tes[name %in% good_line[!(good_line %in% small_line)], `:=`(pass = T, reason = "LINE: long ORF, with a tail or no terminal repeat")]
+    tes[grepl("DIRS", name) & (orf1 > rules_cfg$dirs_min_orf) & (lente < rules_cfg$dirs_max_len), `:=`(pass = T, reason = "DIRS: long ORF")]
+    tes[grepl("Crypton", name), `:=`(pass = T, reason = "Crypton")]
+    tes[grepl("#PLE", name), `:=`(pass = T, reason = "PLE")]
+    tes[grepl("#SINE", name) & lente < rules_cfg$sine_max_len, `:=`(pass = T, reason = "SINE: short")]
+    tes[name %in% good_ltr, `:=`(pass = T, reason = "LTR: terminal LTRs")]
+    tes[name %in% ltr_reco$new, `:=`(pass = T, reason = "reclassified as LTR: matches an LTR element")]
+    tes[name %in% good_tir, `:=`(pass = T, reason = "DNA: TIRs")]
     # DNA elements with a TIR near both ends, including TIRs found by the terminal-TIR
     # finder (good_tir only knows the BLAST calls made before that step)
-    tes[grepl("#DNA", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, pass := T]
-    tes[name %in% tir_reco$new, pass := T]
-    tes[grepl("#RC", name), pass := T]
+    tes[grepl("#DNA", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(pass = T, reason = "DNA: TIRs")]
+    tes[name %in% tir_reco$new, `:=`(pass = T, reason = "reclassified as DNA: matches a DNA element")]
+    tes[grepl("#RC", name), `:=`(pass = T, reason = "RC")]
     ucut <- tryCatch(kneedle(tes[, .N, cluster]$cluster, tes[, .N, cluster]$N)[1],
                      error = function(e) NA)
     if (length(ucut) == 0 || is.na(ucut)) ucut <- rules_cfg$unknown_min_cluster
     lx(paste("Unknown recovery cutpoint:", ucut))
-    tes[grepl("#Unknown", name) & cluster > max(rules_cfg$unknown_min_cluster, ucut), pass := T]
-    tes[name %in% small_line, pass := F]
+    tes[grepl("#Unknown", name) & cluster > max(rules_cfg$unknown_min_cluster, ucut), `:=`(pass = T, reason = "Unknown: large cluster")]
+    tes[name %in% small_line, `:=`(pass = F, reason = "contained in a longer LINE")]
     # This should go at the end of the filters
     tes[is.na(pa), pa := 100]
     tes[, TR2 := maxRep > lente / rules_cfg$tandem_frac]
     tes[is.na(TR2), TR2 := F]
-    tes[TR2 == T & type == "LTR" & maxRep > rules_cfg$tandem_ltr_max, pass := F]
-    tes[type == "TIR" & lgap < rules_cfg$tight_gap & rgap < rules_cfg$tight_gap, pass := T]
+    tes[TR2 == T & type == "LTR" & maxRep > rules_cfg$tandem_ltr_max, `:=`(pass = F, reason = "LTR structure, mostly tandem repeat")]
+    tes[type == "TIR" & lgap < rules_cfg$tight_gap & rgap < rules_cfg$tight_gap, `:=`(pass = T, reason = "TIRs at both ends")]
     # Reclassification by TSDs
     tg_ca <- tes[, grepl("#Unknown", name) & substr(seq, 1, 2) == "TG" &
                    substr(seq, lente - 1, lente) == "CA" &
                    tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c > rules_cfg$tgca_tsd_conf]
-    tes[tg_ca, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T)]
+    tes[tg_ca, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
+                    reason = "Unknown to LTR: TG..CA ends and TSD")]
     lx(paste("Unknown elements reclassified as LTR by TG..CA termini and TSD:", sum(tg_ca)))
     
     tes[grepl("#Unknown", name) & type == "TIR" & tsd_l == rules_cfg$hat_tsd_len & tsd_c > rules_cfg$unknown_tsd_conf &
-        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
-    tes[grepl("#Unknown", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
+        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T,
+        reason = "Unknown to DNA: TIRs and 8 bp TSD"), by = .I]
+    tes[grepl("#Unknown", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T,
+        reason = "Unknown to DNA: TIRs"), by = .I]
     tes[grepl("#Unknown", name) & tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max &
         tsd_c > rules_cfg$unknown_tsd_conf & type == "LTR" & length > rules_cfg$unknown_ltr_min_len &
-        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T), by = .I]
+        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
+        reason = "Unknown to LTR: terminal LTRs and TSD"), by = .I]
     # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
-    tes[grepl("#Unknown", name) & lente < rules_cfg$sine_reco_max_len & pa < rules_cfg$sine_reco_max_pa & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & lente < rules_cfg$sine_reco_max_len & pa < rules_cfg$sine_reco_max_pa & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T,
+        reason = "Unknown to SINE: short, with polyA"), by = .I]
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
-    tes[Ns > (nchar(seq) * opt$max_cons_ns), pass := F]
-    tes[grepl("#LINE", name) & maxRep > rules_cfg$line_rescue_rep, pass := T]
+    tes[Ns > (nchar(seq) * opt$max_cons_ns), `:=`(pass = F, reason = "too many Ns")]
+    tes[grepl("#LINE", name) & maxRep > rules_cfg$line_rescue_rep, `:=`(pass = T, reason = "LINE: internal repeat (maxTR)")]
     
   } else {
     tes[, name := gsub(">", "", name)]
-    tes[, `:=`(pass = FALSE, type = NA_character_, length = 0, lgap = 0, rgap = 0,
+    tes[, `:=`(pass = FALSE, reason = "no self-BLAST hits", type = NA_character_, length = 0, lgap = 0, rgap = 0,
                pa = NA_real_, maxRep = NA_real_, tr3_relatives = 0L, fragment_of = NA_character_,
                Ns = nchar(seq) - nchar(gsub("N", "", seq)))]
     lx("No self-BLAST hits: structural checks skipped")
@@ -2118,11 +2126,13 @@ stats_tes <- function(final, genomes) {
   
   gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, genomes)}))
   gmax <- apply(gtab, 1, max)
-  tes[gmax < opt$min_copies, pass := F]
-  lx(paste("Elements not passing filters:", nrow(tes[pass == FALSE])))
-  wfasta(tes[, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
-  wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final-pass.fa")))
-  stats_data <- tes[, c("name", "lente", "pass", "hom_class", "hom_prob", "cluster", "tsd_l", "tsd_c", "tsd_m",
+  tes[gmax < opt$min_copies, `:=`(pass = F, reason = "too few copies in every genome (-e)")]
+  lx(paste("Elements accepted:", nrow(tes[pass == TRUE]), "; rejected:", nrow(tes[pass == FALSE])))
+  # The library holds the accepted elements; the rejected ones go to their own file
+  # (their reasons are in the stats file, which lists both)
+  wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
+  wfasta(tes[pass == F, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-rejected.fa")))
+  stats_data <- tes[, c("name", "lente", "pass", "reason", "hom_class", "hom_prob", "cluster", "tsd_l", "tsd_c", "tsd_m",
                         "tsd_p", "gencount", "type", "length", "lgap", "rgap", "pa", "tail3_motif", "tail3_len",
                         "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of",
                         "orf1", "orf2", "orf3", "maxRep", "Ns")]
@@ -2130,7 +2140,7 @@ stats_tes <- function(final, genomes) {
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c := 0]
   stats_data$pa <- stats_data$pa < opt$min_polya
   
-  colnames(stats_data) <- c("name", "TE_len", "pass", "homology_class", "homology_prob", "cluster_size",
+  colnames(stats_data) <- c("name", "TE_len", "pass", "reason", "homology_class", "homology_prob", "cluster_size",
                             "TSD_length", "TSD_confidence", "TSD_motif", "TSD_pvalue",
                             "gen_count", "struct_type", "struct_len", "left_gap",
                             "right_gap", "polyA", "tail3_motif", "tail3_len", "tail5_motif", "tail5_len",
