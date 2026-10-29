@@ -9,6 +9,7 @@
 
 ### Changed
 - Internal thresholds that are not command-line options (loop 1 and 2 windows, consensus, edge and TSD search, classification probability, structure rules) are grouped in named settings near the top of the script, each with a short description. Results are unchanged.
+- Loop 2's per-cluster work (`process_cluster_2`, about 450 lines) is split into separate functions: alignment, column consensus, raw edges, the TSD caller, the edge search, the TSD offset refinement and writing the alignment. Results are unchanged.
 
 ### Removed
 - Unused function `cdhit1` and commented-out code.
