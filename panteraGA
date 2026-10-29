@@ -95,6 +95,8 @@ read_pars <- function() {
       "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
       "align_iterations","I", 1, "integer",  "Max mafft refinement iterations for clusters of < 100 sequences < 3 kb; 2 is faster, changes some consensi [1000]",
       "seed",           "r", 1, "integer",   "Random seed for the TIR test; the same data and seed give the same results [1]",
+      "tandem_collapse","t", 1, "integer",   "Collapse tandem arrays with HiRepEat before aligning, max this many rounds; 0 = off [0]",
+      "tandem_image",   "w", 1, "character", "HiRepEat container image (.sif) for -t, if HiRepEat is not on the PATH [$HIREPEAT_IMAGE]",
       "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
       "debug",          "d", 0, "logical",   "Keep intermediate files",
       "verbose",        "v", 0, "logical",   "Show log messages on screen",
@@ -209,6 +211,18 @@ read_pars <- function() {
 
   if (is.null(opt$seed)) {
     opt$seed <- 1
+  }
+
+  # Tandem compression is run by HiRepEat (--rounds 0)
+  if (is.null(opt$tandem_collapse)) {
+    opt$tandem_collapse <- 0
+  }
+  if (opt$tandem_collapse < 0) {
+    stop("[--tandem_collapse|-t] must be 0 or more")
+  }
+
+  if (is.null(opt$tandem_image)) {
+    opt$tandem_image <- Sys.getenv("HIREPEAT_IMAGE")
   }
 
   if (is.null(opt$keep_alignments)) {
@@ -645,6 +659,83 @@ cdhit2 <- function(sequences, threshold) {
   hitcl[,name:=gsub("\\.\\.\\.","",name)]
 } 
 
+
+# Command prefix that runs HiRepEat
+hirepeat_cmd <- function() {
+  if (nchar(Sys.which("HiRepEat")) > 0) {
+    return("HiRepEat")
+  }
+  if (nzchar(opt$tandem_image) && file.exists(opt$tandem_image) &&
+      nchar(Sys.which("singularity")) > 0) {
+    return(paste("singularity run", shQuote(normalizePath(opt$tandem_image))))
+  }
+  ""
+}
+hirepeat_tool <- function(path_in_image, on_path) {
+  bundled <- paste0("/opt/HiRepEat/", path_in_image)
+  if (nzchar(opt$tandem_image) && file.exists(opt$tandem_image) &&
+      nchar(Sys.which("singularity")) > 0) {
+    return(paste("singularity exec", shQuote(normalizePath(opt$tandem_image)), bundled))
+  }
+  if (file.exists(bundled)) {
+    return(bundled)
+  }
+  if (nchar(Sys.which(on_path)) > 0) {
+    return(on_path)
+  }
+  ""
+}
+
+taco_cmd <- function() hirepeat_tool("external/alntools/taco", "taco")
+
+seqconvert_cmd <- function() {
+  hirepeat_tool("external/ONEcode/SEQUENCE_UTILITIES/seqconvert", "seqconvert")
+}
+
+# Runs `taco info` on a .1taco and returns its output lines.
+taco_info <- function(taco_file) {
+  out <- suppressWarnings(system(paste(taco_cmd(), "info", shQuote(taco_file),
+                                       "2> /dev/null"), intern = TRUE))
+  if (!is.null(attr(out, "status")) && attr(out, "status") != 0) {
+    end_pantera(paste0("`taco info` failed on ", taco_file))
+  }
+  out
+}
+
+# Scaffold name <-> index for a .1taco
+taco_scaffold_index <- function(taco_file) {
+  lines <- grep("^\\s*seq [0-9]+ \\(", taco_info(taco_file), value = TRUE)
+  if (length(lines) == 0) {
+    end_pantera(paste0("No sequences listed by `taco info` for ", taco_file))
+  }
+  data.table(idx  = as.integer(sub("^\\s*seq ([0-9]+) \\(.*", "\\1", lines)),
+             name = sub("^[^(]*\\(([^)]*)\\).*", "\\1", lines))
+}
+
+# Lengths before and after, from the "Total:" line of `taco info`
+taco_lengths <- function(taco_file) {
+  total <- grep("^Total:", taco_info(taco_file), value = TRUE)
+  if (length(total) == 0) {
+    return(c(origLen = NA_real_, tacoLen = NA_real_))
+  }
+  field <- function(k) {
+    as.numeric(sub(paste0(".*", k, "=([0-9]+).*"), "\\1", total[1]))
+  }
+  c(origLen = field("origLen"), tacoLen = field("tacoLen"))
+}
+
+# Logging impact of taco layers
+taco_stack_summary <- function(layers) {
+  orig <- taco_lengths(layers[1])[["origLen"]]
+  final <- taco_lengths(layers[length(layers)])[["tacoLen"]]
+  if (is.na(orig) || is.na(final) || orig <= 0) {
+    return("lengths unknown")
+  }
+  bp <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+  paste0(bp(orig), " -> ", bp(final), " bp, ",
+         sprintf("%.1f%%", 100 * (1 - final / orig)), " removed")
+}
+
 # Get number of instances by genome for each TE
 getgenomes <- function(input_string, n) { 
   values_str <- gsub("^#|#", "", input_string)
@@ -698,7 +789,21 @@ init_pantera <- function() {
   if (!(nchar(Sys.which("ONEview")) > 0)) {
     end_pantera("ONEview not found")
   }
-  
+  # Only with -t
+  if (opt$tandem_collapse > 0) {
+    if (!nzchar(hirepeat_cmd())) {
+      end_pantera(paste("HiRepEat not found, needed by [--tandem_collapse|-t].",
+                        "Install it on the PATH (https://github.com/AnantMaheshwari/HiRepEat)",
+                        "or give its container image with [--tandem_image|-w] or $HIREPEAT_IMAGE"))
+    }
+    if (!nzchar(taco_cmd())) {
+      end_pantera("taco not found, needed by [--tandem_collapse|-t]")
+    }
+    if (!nzchar(seqconvert_cmd())) {
+      end_pantera("seqconvert not found, needed by [--tandem_collapse|-t]")
+    }
+  }
+
   for (f in c("model/typesnames", "model/featurenames", "model/xgbmodel.ubj",
               "libs/RepeatPeps.lib", "libs/RepeatPeps.lib.psq")) {
     if (!file.exists(file.path(pantera_home, f))) {
@@ -733,6 +838,12 @@ init_pantera <- function() {
   lx(paste("Debug (keep intermediates):", opt$debug))
   lx(paste("Random seed:", opt$seed))
   lx(paste("mafft iterations for small clusters:", opt$align_iterations))
+  lx(paste("Tandem collapse rounds:",
+           if (opt$tandem_collapse > 0) opt$tandem_collapse else "off"))
+  if (opt$tandem_collapse > 0) {
+    lx(paste("HiRepEat:", hirepeat_cmd()))
+    lx(paste("taco:", taco_cmd()))
+  }
   
   return(0)
 }
@@ -784,30 +895,115 @@ run_fastga <- function(i, a, b, tempf) {
   }
 }
 
+# Converting .1seq from HiRepEat to fasta for panteraGA
+oneseq_to_fasta <- function(seq_file) {
+  fa <- sub("\\.1seq$", ".fa", seq_file)
+  if (file.exists(fa) && file.size(fa) > 0) {
+    return(fa)
+  }
+  status <- system(paste(seqconvert_cmd(), "-fa -o", shQuote(fa), shQuote(seq_file),
+                         "> /dev/null 2>&1"))
+  if (status != 0 || !file.exists(fa) || file.size(fa) == 0) {
+    unlink(fa)
+    end_pantera(paste0("seqconvert failed converting ", seq_file,
+                       " to FASTA (exit status ", status, ")"))
+  }
+  fa
+}
+
+# Collapses tandems
+compress_genomes <- function(paths) {
+  hr <- hirepeat_cmd()
+  root <- paste0(opt$output_folder, "/tandem")
+  out_paths <- character(length(paths))
+  layers <- vector("list", length(paths))
+  iter_of <- function(f) as.integer(sub(".*_taniter([0-9]+)\\..*", "\\1", f))
+  t_all <- Sys.time()
+  for (i in seq_along(paths)) {
+    wd <- paste0(root, "/g", i)
+    dir.create(wd, showWarnings = FALSE, recursive = TRUE)
+    g <- normalizePath(paths[i])
+    lnk <- paste0(wd, "/", basename(g))
+    if (!file.exists(lnk)) {
+      file.symlink(g, lnk)
+    }
+    found <- function() Sys.glob(paste0(wd, "/*_ltr_output/tandem/*_taniter*.1seq"))
+    seqs <- found()
+    if (length(seqs) == 0) {
+      lx(paste0("Collapsing tandem arrays in ", basename(g),
+                " (max ", opt$tandem_collapse, " rounds)"))
+      t0 <- Sys.time()
+      status <- system(paste("cd", shQuote(wd), "&&", hr,
+                             "--genome", shQuote(basename(g)),
+                             "--rounds 0",
+                             "--tandem-rounds", opt$tandem_collapse))
+      if (status != 0) {
+        end_pantera(paste0("HiRepEat failed collapsing ", g,
+                           " (exit status ", status, ")"))
+      }
+      lx(paste0("  ", basename(g), ": ",
+                round(as.numeric(difftime(Sys.time(), t0, units = "secs"))), " s"))
+      seqs <- found()
+    } else {
+      lx(paste0("Reusing the collapsed ", basename(g), " already in ", wd))
+    }
+    if (length(seqs) == 0) {
+      # HiRepEat converged on the first round: nothing to collapse
+      lx(paste0("  ", basename(g), ": no tandem arrays found, using the genome as it is"))
+      out_paths[i] <- paths[i]
+      layers[[i]] <- character(0)
+      next
+    }
+    tacos <- Sys.glob(paste0(wd, "/*_ltr_output/tandem/*_taniter*.1taco"))
+    seqs <- seqs[order(iter_of(seqs))]
+    last_seq <- normalizePath(seqs[length(seqs)])       # highest round = cumulative
+    layers[[i]] <- normalizePath(tacos[order(iter_of(tacos))])  # lift wants round order
+    lx(paste0("  ", basename(g), ": ", length(layers[[i]]), " round(s), ",
+              taco_stack_summary(layers[[i]])))
+    out_paths[i] <- oneseq_to_fasta(last_seq)
+  }
+  lx(paste0("Tandem collapse of ", length(paths), " genomes took ",
+            round(as.numeric(difftime(Sys.time(), t_all, units = "secs"))), " s"))
+  list(paths = out_paths, layers = layers)
+}
+
 # Make alignments with FastGA
 make_alignments <- function(glist) {
   # Check if file exists
   if (!file.exists(glist)) {
     end_pantera(paste0("File not found: ", glist))
   }
-  genomes <- readLines(glist)
-  genomes <<- trimws(genomes[nzchar(trimws(genomes))])
-  lgenomes <- length(genomes)
+  glines <- trimws(readLines(glist))
+  glines <- glines[nzchar(glines)]
+  lgenomes <- length(glines)
   if (lgenomes<2) {
     end_pantera(paste0("At least two genomes needed in ", glist))
   }
-  missing <- genomes[!file.exists(genomes)]
+  missing <- glines[!file.exists(glines)]
   if (length(missing) > 0) {
     end_pantera(paste0("Genome file(s) in ", glist, " not found: ", paste(missing, collapse = ", ")))
   }
-  dups <- unique(genomes[duplicated(genomes)])
+
+  genome_labels <<- basename(glines)
+  dups <- unique(genome_labels[duplicated(genome_labels)])
   if (length(dups) > 0) {
     end_pantera(paste0("Genome(s) listed more than once in ", glist, ": ", paste(dups, collapse = ", ")))
   }
+  if (opt$tandem_collapse > 0) {
+    ones <- genome_labels[grepl("\\.1seq$", glines)]
+    if (length(ones) > 0) {
+      end_pantera(paste0("[--tandem_collapse|-t] needs genomes in FASTA; these are 1-code: ",
+                         paste(ones, collapse = ", ")))
+    }
+    collapsed <- compress_genomes(glines)
+    glines <- collapsed$paths       # the collapsed genomes are what gets aligned
+    taco_layers <<- collapsed$layers
+  }
+  genomes <<- glines
   tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
   # Ring of pairwise alignments: 1 vs 2, 2 vs 3, ..., last vs 1
   for (i in 1:lgenomes) {
-    run_fastga(i, genomes[i], genomes[if (i < lgenomes) i + 1 else 1], tempf)
+    run_fastga(i, glines[i], glines[if (i < lgenomes) i + 1 else 1], tempf)
   }
   return(lgenomes)
 }
@@ -2052,6 +2248,64 @@ produce_annotation <- function() {
   dir.create("annotations")
   lapply(unique(annotations$gen), function(x) {fwrite(annotations[gen==x,c("chr","start","end", "names")],paste0("annotations/",x,".bed"), col.names = F, sep ="\t")})
   unlink("anno", recursive=TRUE)
+  lift_annotations()
+}
+
+# Lift coordinates back to original genome space (TACO/SALSA)
+lift_annotations <- function() {
+  if (length(taco_layers) == 0) {
+    return(invisible(NULL))
+  }
+  taco <- taco_cmd()
+  for (i in seq_along(genome_labels)) {
+    stack <- taco_layers[[i]]
+    bed <- paste0("annotations/", genome_labels[i], ".bed")
+    if (length(stack) == 0 || !file.exists(bed) || file.size(bed) == 0) {
+      next
+    }
+    a <- fread(bed, header = FALSE, sep = "\t",
+               col.names = c("chr", "start", "end", "names"), colClasses = "character")
+    scaffolds <- taco_scaffold_index(stack[length(stack)])
+    
+    missing <- setdiff(unique(a$chr), scaffolds$name)
+    if (length(missing) > 0) {
+      end_pantera(paste0(length(missing), " scaffold(s) of ", genome_labels[i],
+                         " are not in ", stack[length(stack)],
+                         ", cannot lift their annotations: ",
+                         paste(head(missing, 5), collapse = ", "),
+                         if (length(missing) > 5) ", ..." else ""))
+    }
+    nbed <- nrow(a)
+    a <- merge(a, scaffolds, by.x = "chr", by.y = "name", sort = FALSE)
+    if (nrow(a) != nbed) {
+      end_pantera(paste0("The scaffold map of ", stack[length(stack)], " turned the ",
+                         nbed, " annotations of ", genome_labels[i], " into ", nrow(a)))
+    }
+    fwrite(a[, .(idx, start, end, names)], "lift_in.bed",
+           col.names = FALSE, sep = "\t", quote = FALSE)
+    status <- system(paste(taco, "lift lift_in.bed",
+                           paste(shQuote(stack), collapse = " "), "> lift_out.bed"))
+    if (status != 0 || !file.exists("lift_out.bed") || file.size("lift_out.bed") == 0) {
+      end_pantera(paste0("taco lift failed on the annotations of ", genome_labels[i],
+                         " (exit status ", status, ")"))
+    }
+    b <- fread("lift_out.bed", header = FALSE, sep = "\t",
+               col.names = c("idx", "start", "end", "names"), colClasses = "character")
+    b[, idx := as.integer(idx)]
+    b <- merge(b, scaffolds, by = "idx", sort = FALSE)
+    if (nrow(b) != nrow(a)) {
+      end_pantera(paste0("taco lift returned ", nrow(b), " of the ", nrow(a),
+                         " annotations of ", genome_labels[i]))
+    }
+    if (opt$debug) {   # the same annotations before the lift, to check it against
+      file.rename(bed, paste0("annotations/", genome_labels[i], ".collapsed.bed"))
+    }
+    fwrite(b[, .(name, start, end, names)], bed, col.names = FALSE, sep = "\t", quote = FALSE)
+    unlink(c("lift_in.bed", "lift_out.bed"))
+    lx(paste0("  ", genome_labels[i], ": ", nrow(b), " annotations lifted through ",
+              length(stack), " layer(s)"))
+  }
+  lx("Annotations are in the coordinates of the original genomes")
 }
 # Delete temporary files
 cleanup <- function() {
@@ -2106,11 +2360,15 @@ seg_flanks <- data.table(name = character(), lx = numeric(), rx = numeric())
 segments_unique <- data.table(name = as.character(),
                               seq = as.character())
 
+
+genome_labels <- character(0)
+taco_layers <- list()
+
 invisible(tryCatch({lgenomes <- make_alignments(opt$genomes)}, error = function(err) {
   end_pantera(paste("Alignments error ->",geterrmessage()))
 }))
 
-genomes <- basename(genomes)
+genomes <- genome_labels
 
 invisible(tryCatch({segments_unique <- read_poly(lgenomes)}, error = function(err) {
   end_pantera(paste("Error reading polymorphisms ->",geterrmessage()))

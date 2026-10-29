@@ -66,6 +66,8 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-z, --anno_identity` | 0.80 | Min identity of a hit, and min length ratio hit/element, for genome annotation |
 | `-I, --align_iterations` | 1000 | Max mafft refinement iterations (L-INS-i) for clusters of fewer than 100 sequences shorter than 3 kb; 1000 is what mafft `--auto` uses. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi: in that test about 20% differed slightly and a few short elements were gained or lost |
 | `-r, --seed` | 1 | Random seed for the TIR test. The same data and seed give identical results, whatever `-T` |
+| `-t, --tandem_collapse` | 0 (off) | use HiRepEat to collapse the tandem arrays of each genome before aligning, with at most this many rounds.
+| `-w, --tandem_image` | `$HIREPEAT_IMAGE` | HiRepEat container image (`.sif`) to run `-t` from, when `HiRepEat` is not on the `PATH` |
 | `-k, --keep_alignments` | | Keep the FastGA alignments (`.1aln`) |
 | `-d, --debug` | | Keep intermediate files, and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
@@ -82,7 +84,8 @@ In the output folder:
 | `mylib-pantera-final-pass.fa` | Only the elements that pass the structural checks |
 | `mylib-pantera-final.stats.tsv` | Per element: length, class, pass, cluster size, TSD, terminal repeats, tails, copies per genome... |
 | `alignments/` | The alignment (`.maf`) behind each consensus, named as the element. Each copy shows its flanks in lowercase and the insertion in uppercase |
-| `annotations/` | A BED file per genome with the copies of each element |
+| `annotations/` | A BED file per genome with the copies of each element. With `-t`, in the coordinates of the original genomes |
+| `tandem/` | Only with `-t`: the collapsed genomes (`.1seq`) and their coordinate maps (`.1taco`) |
 | `pantera.log` | Log of the run |
 
 Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within each class.
