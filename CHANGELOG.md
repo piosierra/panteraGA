@@ -12,6 +12,7 @@ Libraries, stats, alignments and annotations are identical to 1.4.0, and runs ar
 - Log typos: "Processing N alignments" (was "Procesing"), "successfully". `scripts/compare_runs.sh` accepts both spellings.
 
 ### Changed
+- The FastGA alignments are named after the two genomes they align: `<genome1>_<genome2>.1aln` (file names without folders or extensions), instead of `pantera<n>.1aln`. Alignments named `pantera<n>.1aln` by earlier versions are still reused (renamed) when found in the output folder. Genome files whose names are the same without folders and extensions (e.g. `a.fa.gz` and `a.fna`) are now refused.
 - Internal thresholds that are not command-line options (loop 1 and 2 windows, consensus, edge and TSD search, classification probability, structure rules) are grouped in named settings near the top of the script, each with a short description. Results are unchanged.
 - Loop 2's per-cluster work (`process_cluster_2`, about 450 lines) is split into separate functions: alignment, column consensus, raw edges, the TSD caller, the edge search, the TSD offset refinement and writing the alignment. Results are unchanged.
 - panteraGA no longer changes the working directory (`setwd`): every file is written with its full path in the output folder, and file paths passed to external tools are quoted. Functions no longer assign global variables (`<<-`): the genome names and the segment flank lengths are set once in the main part of the script. Results are unchanged.

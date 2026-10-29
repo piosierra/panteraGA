@@ -431,7 +431,7 @@ parseONEview <- function(genomes) {
   lx(paste("Processing", n, "alignments"))
   ovret <- data.table(name = character(), seq = character(), lx = numeric(), rx = numeric())
   for (i in 1:n) {
-    f <- paste0(opt$output_folder,"/pantera",i,".1aln")
+    f <- aln_path(genomes, i)
     system2("svfind", args = paste0(" -x ", svfind_flank, " -s ", min(50, opt$min_size), " -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
     if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
       ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
@@ -878,13 +878,32 @@ check_tasks <- function(res, what, labels = NULL) {
   invisible(res)
 }
 
+# Genome name for file names: the file name without folders or the extension
+# (.fa, .fasta, .fna, .fas, each optionally .gz)
+genome_stem <- function(g) {
+  sub("\\.(fa|fasta|fna|fas)$", "", sub("\\.gz$", "", basename(g), ignore.case = TRUE),
+      ignore.case = TRUE)
+}
+
+# FastGA alignment i of the ring (genome i against the next one), named after both
+# genomes: <genome i>_<genome i+1>.1aln in the output folder
+aln_path <- function(genomes, i) {
+  j <- if (i < length(genomes)) i + 1 else 1
+  outf(paste0(genome_stem(genomes[i]), "_", genome_stem(genomes[j]), ".1aln"))
+}
+
 # Runs FastGA on two genomes and stops the run if no alignment was produced
-run_fastga <- function(i, a, b, tempf) {
-  aln <- paste0(opt$output_folder, "/pantera", i, ".1aln")
+run_fastga <- function(i, a, b, aln, tempf) {
   lx(paste0("Aligning ", gsub(".*/", "", a), " <-> ", gsub(".*/", "", b)))
+  # Alignments from runs before 1.4.1 were named pantera<i>.1aln: reuse them
+  old <- outf(paste0("pantera", i, ".1aln"))
+  if (!file.exists(aln) && file.exists(old)) {
+    lx(paste0("Using ", basename(old), " (renamed to ", basename(aln), ")"))
+    file.rename(old, aln)
+  }
   if (!file.exists(aln)) {
     dir.create(tempf, showWarnings = FALSE)
-    status <- system(paste0("FastGA -1:", opt$output_folder, "/pantera", i, " -P", tempf, " ", a, " ", b))
+    status <- system(paste0("FastGA -1:", aln, " -P", tempf, " ", a, " ", b))
     unlink(tempf, recursive = TRUE)
     if (status != 0 || !file.exists(aln) || file.size(aln) == 0) {
       unlink(aln)
@@ -913,10 +932,18 @@ make_alignments <- function(glist) {
   if (length(dups) > 0) {
     end_pantera(paste0("Genome(s) listed more than once in ", glist, ": ", paste(dups, collapse = ", ")))
   }
+  # Genomes are told apart by their file names (segment names, counts per genome,
+  # alignment and annotation files), so these must differ
+  stems <- genome_stem(genomes)
+  same <- genomes[stems %in% stems[duplicated(stems)]]
+  if (length(same) > 0) {
+    end_pantera(paste0("Genome files in ", glist, " must have different names, without folders and extensions: ",
+                       paste(same, collapse = ", ")))
+  }
   tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
   # Ring of pairwise alignments: 1 vs 2, 2 vs 3, ..., last vs 1
   for (i in 1:lgenomes) {
-    run_fastga(i, genomes[i], genomes[if (i < lgenomes) i + 1 else 1], tempf)
+    run_fastga(i, genomes[i], genomes[if (i < lgenomes) i + 1 else 1], aln_path(genomes, i), tempf)
   }
   return(genomes)
 }
