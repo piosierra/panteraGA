@@ -45,12 +45,10 @@ pantera_home <- Sys.getenv("PANTERA_HOME",
 
 # Prints log messages
 lx <- function(x) {
-  #  g <- gc()
   cat(paste0(
     format(Sys.time(), "%y-%m-%d:%H:%M:%S"),
     " \u001b[95;1;1m[panteraGA ",
     pantera_version, 
-    #    "]\u001b[0m Mem: ",g[1,2]+g[2,2]," Mb : ",
     "]\u001b[0m ",
     x,
     "\n"
@@ -240,12 +238,7 @@ ffasta <- function(f) {
   }
 }
 
-## Writes a fasta file
-# wfasta <- function(fasta_data, f) {
-#   fileconn <- file(f)
-#   writeLines(t(fasta_data), fileconn)
-#   close(fileconn)
-# }
+# Writes a fasta file
 wfasta <- function(fasta_data, f) {
   # 1. Clean path slashes and find the target directory
   f <- normalizePath(f, winslash = "/", mustWork = FALSE)
@@ -332,7 +325,7 @@ kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
 
 # Reads the two ONEcode files extracted from a 1aln file with svfind
 parseONEview <- function(n) {
-  lx(paste("Procesing ", n, " alignments"))
+  lx(paste("Processing", n, "alignments"))
   ovret <- data.table(name = character(), seq = character(), lx = numeric(), rx = numeric())
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
@@ -387,8 +380,6 @@ parseONEview <- function(n) {
           ovall[ov < -seq_len ,ov:=1]
           ovall <- ovall[ov>0]
           unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
-          # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapa"))
-          # unlink(paste0(opt$output_folder,"/",opt$lib_name,"hapb"))
           ovall[, Ns := nchar(seq) - nchar(gsub("N", "", seq, ignore.case = TRUE))]
           ovall <- ovall[Ns <= (nchar(seq) * opt$max_ns)]
           lx(paste("Number of valid Ns segments =", nrow(ovall)))
@@ -398,8 +389,6 @@ parseONEview <- function(n) {
       
     }
   }
-  # ovret[,name:=paste0(">",.I)]
-  ### Trim sequences to leave flanking edges not too long
   return(ovret)
 }
 
@@ -580,18 +569,6 @@ read_clstr <- function(f) {
              clus = cumsum(hdr)[mem])
 }
 
-# Calls and processes cdhit
-cdhit1 <- function(sequences, threshold) {
-  fname <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",sequences[1]$name), collapse=""))
-  wfasta(sequences[,1:2],fname)
-  system(paste0("cd-hit-est -T 1 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
-  hitcl <- read_clstr(paste0("cl",fname,".clstr", collapse = ""))
-  unlink(fname)
-  unlink(paste0("cl",fname,".clstr", collapse = ""))
-  unlink(paste0("cl",fname, collapse = ""))
-  hitcl[,name:=gsub("\\.\\.\\.","",name)]
-} 
-
 # Flank lengths (lx, rx) of segments by name, as reported by svfind.
 # Falls back to 100 (the -x given to svfind) for names not in the table.
 seg_flank_lengths <- function(names) {
@@ -654,10 +631,7 @@ getgenomes <- function(input_string, n) {
   result <- data.table(matrix(0, nrow = 1, ncol = n))
   colnames(result) <- gsub(".*/","",genomes)
   for (i in seq_along(keys)) {
-    #if (keys[i] >= 1 && keys[i] <= n) {
-    #   set(result[1,which(keys[i] %in% colnames(result))] <- vals[i]
     set(result, i = 1, j = which( colnames(result) %in% keys[i]), value = vals[i])
-    #}
   }
   return(result)
 }
@@ -680,8 +654,6 @@ init_pantera <- function() {
   ## Confirm dependencies are available
   if (!(nchar(Sys.which("mafft")) > 0)) {
     end_pantera("mafft not found")
-  } else {
-    mafft_exec <- Sys.which("mafft")
   }
   if (!(nchar(Sys.which("getorf")) > 0)) {
     end_pantera("getorf not found")
@@ -823,7 +795,6 @@ find_repeats <- function() {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
         if (nrow(segment_u) >= opt$min_cluster)  {
-          #    lx(paste0("Num. of segments zone ",start," - ",end," : ", nrow(segment_u)))
           segment_sets <- split(segment_u, 
                                 rep(1:(nrow(segment_u) %/% opt$max_cluster +1), 
                                     length.out = nrow(segment_u), 
@@ -833,7 +804,6 @@ find_repeats <- function() {
           candidates <- data.table(name = as.character(), 
                                    seq = as.character())
           for (ss in 1:length(segment_sets)) {
-            #     lx(paste0("Num. of segments zone ", start," - ", end," : cluster : ",ss))
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
               sg_clus <- cdhit2(sg, opt$identity1)
@@ -895,7 +865,6 @@ find_repeats <- function() {
   check_tasks(loop_exit, "Loop 1",
               vapply(rev(zones), function(z) paste0("window ", z[1], "-", z[2]), ""))
   
- # lx(paste("Total sequences discarded:", sum(as.numeric(unlist(loop_exit)))))
   system(paste0("mv ../all_segments.fa ../pantera_lib_", round - 1, ".fa"))
   system("cat candidates*.fa > ../segments_candidates.fa")
   setwd("..")
@@ -1040,6 +1009,17 @@ cluster_results <- function() {
     seqs_clust <- job$seqs
     t_job <- Sys.time()
     result <- NULL
+    # What every exit returns: the consensus (NULL if none), where it goes, and timing
+    done <- function() {
+      list(consensus = result, file = job$file, rank = job$rank,
+           timing = data.table(win_start = start, win_end = end, set = job$ss, cluster = u,
+                               n_seqs = nrow(seqs_clust), mean_len = round(mean(nchar(seqs_clust$seq))),
+                               max_len = max(nchar(seqs_clust$seq)), aln_len = aln_len,
+                               seconds = round(mafft_s, 2),
+                               total_s = round(as.numeric(difftime(Sys.time(), t_job, units = "secs")), 2),
+                               t_start = round(as.numeric(t_job), 2), t_end = round(as.numeric(Sys.time()), 2),
+                               pid = Sys.getpid()))
+    }
     mafft_s <- NA_real_
     aln_len <- NA_integer_
     clust_temp <- strsplit(seqs_clust$seq, "")
@@ -1062,9 +1042,6 @@ cluster_results <- function() {
       mafft_s <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
       aln_len <- if (is.matrix(ali)) ncol(ali) else NA_integer_
       alim <- reformatDNA(ali)
-      # cons <- toupper(Biostrings::consensusString(Biostrings::DNAStringSet(alim), 
-      #                                             ambiguityMap = "-",
-      #                                             threshold = cons_threshold))
       
       ### TSD data
       ## ==========================================================================
@@ -1111,7 +1088,7 @@ cluster_results <- function() {
                                            ifelse(x <= 20, 3, 2))))))
       }
       cons_s <- stri_locate_first_fixed(consstring,paste0(rep(1,get_sequence_value(nseqs)),collapse =""))[1]
-      if (is.na(cons_s)) next   # no conserved block: skip this cluster, not the whole window
+      if (is.na(cons_s)) return(done())   # no conserved block: no consensus for this cluster
       ## ---- cons_e: end of the same conserved block cons_s belongs to ----------
       ## Trivial gaps (<= small_gap columns - ordinary single-base dropouts inside
       ## an otherwise solid block) always bridge. Larger gaps only bridge if
@@ -1446,10 +1423,8 @@ cluster_results <- function() {
       tsds_conf  <- tsd_summary$modal_conf
       tsds_motif <- tsd_summary$modal_motif
       if (is.na(tsd_len)) {
-        # No significant TSD found at all - fall back to the same degenerate
-        # "no signal" values the original fixed-window method produced in this
-        # situation (tsd_len 2, confidence 0), so downstream filename/logic that
-        # doesn't expect NA keeps working unchanged.
+        # No significant TSD: length 0, confidence 0, no motif (not NA, so the
+        # consensus name and the rules downstream keep working).
         tsd_len <- 0
         tsds_conf <- 0
         tsds_motif <- ""
@@ -1461,15 +1436,13 @@ cluster_results <- function() {
       
       gencounts <- table(gsub(">","",gsub("#.*","",seqs_clust$name)))
       gencounts <- paste0("#",paste0(c(rbind(names(gencounts),gencounts)),collapse="---"),"#")
-    }  else {
-      cons <- toupper(paste0(unlist(as.character(seqs)), 
-                             collapse = ""))
+    } else {
+      return(done())   # a single sequence (only possible with -m 1): no consensus
     }
     alll <- nchar(cons)
     cons <- substr(cons,cons_s,cons_e)
     cutl <- nchar(cons)
     cons <- gsub("-","",cons)
-    # cons <- paste0(strsplit(cons,"")[[1]][saturation[cons_s:cons_e]>saturation_threshold],collapse="")
     nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
                   nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif, "_gens",gencounts,"@@")
     if ((nchar(cons) >= max(100, opt$min_size)) &
@@ -1481,17 +1454,7 @@ cluster_results <- function() {
       
     }
     
-    # wfasta(alim, paste0("../alignments/consensi_", start, "_",
-    #                     end,"-",u, ".maf"))
-    
-    list(consensus = result, file = job$file, rank = job$rank,
-         timing = data.table(win_start = start, win_end = end, set = job$ss, cluster = u,
-                             n_seqs = nrow(seqs_clust), mean_len = round(mean(nchar(seqs_clust$seq))),
-                             max_len = max(nchar(seqs_clust$seq)), aln_len = aln_len,
-                             seconds = round(mafft_s, 2),
-                             total_s = round(as.numeric(difftime(Sys.time(), t_job, units = "secs")), 2),
-                             t_start = round(as.numeric(t_job), 2), t_end = round(as.numeric(Sys.time()), 2),
-                             pid = Sys.getpid()))
+    done()
   }
 
   # Round 2, step 1 (per length window): clusters the segments and returns one job
@@ -1514,12 +1477,10 @@ cluster_results <- function() {
              paste0("timing_win_", start, "_", end, ".tsv"), sep = "\t")
     }, add = TRUE)
     if (start != end) {
-      #    lx(paste("Procesing segments:", start, "-", end))
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
         segment_u <- segments_unique[len >= start][len <= end]
         segment_u <- segment_u[!duplicated(segment_u)]
         n_seg <- nrow(segment_u)
-        #        lx(paste("Number of sequences:", nrow(segment_u)))
         if (nrow(segment_u) >= opt$min_cluster)  {
           segment_sets <- split(segment_u, 
                                 rep(1:(nrow(segment_u) %/% opt$max_cluster +1), 
@@ -1531,7 +1492,6 @@ cluster_results <- function() {
           for (ss in 1:length(segment_sets)) {
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
-              #  lx(paste("Segment sets", start, "-", end, ":", nrow(sg)))
               t0 <- Sys.time()
               sg_clus <- cdhit2(sg, opt$identity2)
               cdhit_s <- cdhit_s + as.numeric(difftime(Sys.time(), t0, units = "secs"))
@@ -1551,7 +1511,6 @@ cluster_results <- function() {
         }
       }
     }
-    #  lx(paste("Zone:", start, "completed."))
     return(jobs)
   }
   
@@ -1592,7 +1551,6 @@ cluster_results <- function() {
       zones <- asplit(data.frame(start = z[-length(z)], end = z[-1]), 1)
     }
     
-    #     lx(paste("Processing:", length(zones), "windows"))
     # Step 1: cluster each window (in parallel); each window returns its clusters as jobs
     zone_out <- mclapply(
       rev(zones),
@@ -2056,7 +2014,7 @@ produce_annotation <- function() {
 # Delete temporary files
 cleanup <- function() {
   
-  lx("Library succesfully created.")
+  lx("Library successfully created.")
   unlink("alignments/X.CONS*")
   unlink("loop_1", recursive = TRUE)
   unlink("loop_2", recursive = TRUE)
@@ -2064,7 +2022,6 @@ cleanup <- function() {
   unlink("pantera_lib_0.fa")
   unlink("all_segments_flanks.tsv")
   unlink("segments_candidates.fa")
-  # file.rename("segments_candidates.fa", paste0(opt$lib_name, "-segments_candidates.fa"))
   unlink("temp.orfs")
   unlink("*consensi*")
   if (opt$keep_alignments == FALSE) {
@@ -2135,7 +2092,7 @@ invisible(tryCatch({produce_annotation()}, error = function(err) {
 }))
 if (opt$debug == FALSE) {
   invisible(tryCatch({cleanup()}, error = function(err) {
-    end_pantera(paste("Error Cleanning up ->",geterrmessage()))
+    end_pantera(paste("Error cleaning up ->",geterrmessage()))
   }))
 } else {
   setwd(current)

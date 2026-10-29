@@ -4,6 +4,11 @@
 
 ### Fixed
 - No more R warnings "'/etc/localtime' is not a symlink" / "is not identical to any known timezone file" when running in a container: if `TZ` is unset and `/etc/localtime` is a regular file, panteraGA uses it directly (`TZ=:/etc/localtime`), keeping the host's local time.
+- Loop 2 no longer stops the run when a cluster's alignment has no conserved block, or when a cluster holds a single sequence (possible only with `-m 1`): the cluster gives no consensus. Both cases used an R `next` outside a loop and would have stopped the run with an error; neither happened in the test runs.
+- Log typos: "Processing N alignments" (was "Procesing"), "successfully". `scripts/compare_runs.sh` accepts both spellings.
+
+### Removed
+- Unused function `cdhit1` and commented-out code.
 
 ## [1.4.0]
 

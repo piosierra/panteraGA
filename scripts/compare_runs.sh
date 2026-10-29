@@ -25,7 +25,7 @@ secs() {  # yy-mm-dd:HH:MM:SS -> seconds since midnight (runs within one day)
 }
 echo "== Processing time (from reading the alignments to the end)"
 for d in "$A" "$B"; do
-  s=$(grep -m1 "Procesing" "$d/pantera.log" | cut -c1-17)
+  s=$(grep -m1 -E "Procesing|Processing [0-9]+ alignments" "$d/pantera.log" | cut -c1-17)
   e=$(tail -1 "$d/pantera.log" | cut -c1-17)
   echo "  $d: $(( $(secs "$e") - $(secs "$s") )) s"
 done
