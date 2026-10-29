@@ -1725,10 +1725,12 @@ classify_tes <- function() {
   wfasta(final[, c("name", "seq")], file)
   lx(paste("Final consensi: ", nrow(final)))
   lx("Reading orfs")
+  # BLAST: -mt_mode 1 splits the work between threads by query. The default splits by
+  # database, which with one small database leaves most threads idle. Same hits.
   system(
     paste0(
       "getorf -sequence ", shQuote(file),
-      " --outseq ", shQuote(outf("temp.orfs")), " -minsize 100 >/dev/null 2>&1; blastp -num_threads ", opt$threads,
+      " --outseq ", shQuote(outf("temp.orfs")), " -minsize 100 >/dev/null 2>&1; blastp -num_threads ", opt$threads, " -mt_mode 1",
       " -query ", shQuote(outf("temp.orfs")), " -db ",
       shQuote(file.path(pantera_home, "libs/RepeatPeps.lib")),
       " -outfmt 6 -evalue 1e-1 > ", shQuote(outf("orfs.tbl"))
@@ -1842,7 +1844,7 @@ stats_tes <- function(final, genomes) {
   system(paste0("makeblastdb -in ", shQuote(tmp_tes), " -dbtype nucl 1> /dev/null"))
   te_data <- fread(cmd = paste0("blastn -query ", shQuote(tmp_tes), " -db ", shQuote(tmp_tes),
                                 " -task blastn -num_threads ",
-                                opt$threads,
+                                opt$threads, " -mt_mode 1",
                                 " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"), header = F)
   if (nrow(te_data) > 0) {
     colnames(te_data) <- c("qseqid", "sseqid", "pident", "length", "mismatch",
@@ -2108,7 +2110,7 @@ produce_annotation <- function() {
   system(paste0("makeblastdb -in ", shQuote(outf("pantera_lib_0.fa")), " -out ", shQuote(db),
                 " -dbtype nucl 1> /dev/null"))
   te_data <- fread(cmd= paste0("blastn -query ", shQuote(lib_fa), " -db ", shQuote(db),
-                               " -task blastn -num_threads ", opt$threads,
+                               " -task blastn -num_threads ", opt$threads, " -mt_mode 1",
                                " -evalue 500 -outfmt 6"), header = F)
   polys <- ffasta(lib_fa)
   polys[,l:=nchar(seq)]

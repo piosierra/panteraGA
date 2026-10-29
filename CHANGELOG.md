@@ -14,6 +14,7 @@
 - Loop 2's per-cluster work (`process_cluster_2`, about 450 lines) is split into separate functions: alignment, column consensus, raw edges, the TSD caller, the edge search, the TSD offset refinement and writing the alignment. Results are unchanged.
 - panteraGA no longer changes the working directory (`setwd`): every file is written with its full path in the output folder, and file paths passed to external tools are quoted. Functions no longer assign global variables (`<<-`): the genome names and the segment flank lengths are set once in the main part of the script. Results are unchanged.
 - The terminal TIR test is about 8 times faster: the 100 shuffled copies it compares each element with are aligned all at once, and only their scores are computed. Results are unchanged (same shuffles, same scores, same p-values).
+- BLAST (classification, structure checks, annotation) splits the work between threads by query (`-mt_mode 1`). By default BLAST splits by database, and with one small database most threads stayed idle (annotation used 1.35 of 8 threads). Same hits, in the same order. Requires BLAST+ 2.12 or later (recipe updated).
 
 ### Removed
 - Unused function `cdhit1` and commented-out code.

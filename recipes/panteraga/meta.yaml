@@ -31,7 +31,7 @@ requirements:
     - bioconductor-biostrings
     - mafft
     - emboss        # getorf
-    - blast         # blastp, blastn, makeblastdb
+    - blast >=2.12  # blastp, blastn, makeblastdb (-mt_mode needs 2.12)
     - cd-hit        # cd-hit-est
     - fastga        # FastGA, ONEview
     - alntools      # svfind
