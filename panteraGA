@@ -40,6 +40,107 @@ pantera_home <- Sys.getenv("PANTERA_HOME",
 
 
 ###
+### Internal settings: thresholds that are not command-line options.
+### Changing a value here changes the results; each one is used where its
+### list is named in the code (e.g. tsd_cfg$max_len).
+###
+
+# Flank length requested from svfind (-x), on each side of an insertion. Also the
+# flank length assumed for segments whose exact flanks are unknown.
+svfind_flank <- 100
+
+# Loop 1: length windows for the first clustering round
+loop1_cfg <- list(
+  window = 60,            # window width (bp, segment length with flanks)
+  window_overlap = 30     # added on each side of a window
+)
+
+# Loop 2: clustering, alignment and consensus
+loop2_cfg <- list(
+  window = 300,           # window width (bp)
+  window_overlap = 0,
+  max_cluster = 1000,     # max sequences per cd-hit run (replaces -u in round 2)
+  small_n = 100,          # clusters with fewer sequences than this, all shorter than
+  small_len = 3000,       #   small_len, are aligned with L-INS-i and up to -I iterations
+  cons_threshold = 0.3,   # min fraction of a column for its majority base in the consensus
+  conserv_threshold = 0.8,# a column is conserved if its majority base is >= this fraction
+  sat_threshold = 0.4,    #   of its bases, and >= this fraction of sequences have a base
+  min_cons_len = 100,     # min consensus length (or -s, if larger)
+  min_trimmed = 180       # min alignment columns outside the consensus edges; fewer means
+                          #   the cluster reaches the flanks (most likely a segmental duplication)
+)
+
+# Consensus edges: extending a conserved block across gaps
+edges_cfg <- list(
+  small_gap = 20,         # gaps up to this many columns are always bridged
+  lookahead = 1000,       # larger gaps are bridged if, within this many columns after the
+  min_cluster_total = 10  #   block, at least this many conserved columns follow
+)
+
+# Target site duplications (TSD) and the search for the element edges
+tsd_cfg <- list(
+  max_len = 13L,          # longest TSD tested (bp); the shortest is min_len
+  min_len = 2L,
+  max_offset = 6L,        # max bases between an edge and its TSD copy (offset refinement)
+  min_identity = 0.8,     # min identity between the two copies of a TSD
+  local_composition = TRUE, # chance match probability from the flank base composition
+                          #   (FALSE: 0.25 per base)
+  sig_threshold = 0.1,    # max p-value for a copy's own TSD call to count
+  alpha = 0.05,           # significance of the agreement between copies (corrected)
+  motif_min_support = 2,  # min copies supporting a TSD to report its motif
+  max_shift = 12,         # edges are moved up to this many columns each way
+  min_core = 20,          # never shrink the element below this many columns
+  adequate_support = 0.65,# min fraction of copies agreeing on a TSD before moving an edge
+  collapse_below = 0.15,  # one step past a real TSD, support falls below this fraction
+  strict_pval = 0.01,     # offset refinement: p-value of a "strict" TSD call
+  min_strict_count = 6    #   and min number of strict calls at the same offset
+)
+
+# Classification
+class_cfg <- list(
+  min_prob = 0.4          # min classifier probability; below it the class is Unknown
+)
+
+# Structure rules (stats_tes): which elements pass, and reclassification.
+# "gap" is the distance in bp from a terminal repeat (LTR or TIR) to the element end.
+rules_cfg <- list(
+  end_gap = 8,            # max gap for a terminal repeat to count as being at the ends
+  tight_gap = 3,          # any element with a TIR within this gap of both ends passes
+  ltr_min_len = 100,      # min LTR length for an element classified as LTR
+  self_rep_min = 20,      # min length of an internal self-match counted in maxTR
+  tandem_frac = 2.5,      # maxTR > length / tandem_frac marks an element as mostly tandem repeat
+  tandem_ltr_max = 100,   #   LTR elements with such a repeat longer than this fail
+  line_min_orf = 1600,    # min longest ORF for a LINE
+  line_max_pa = 10,       # LINE: max distance of a polyA from an end
+  line_inner_gap = 10,    # LINE: also passes if its self-match is more than this from both ends
+  line_rescue_rep = 50,   # LINE: passes if maxTR is larger than this (applied last)
+  dup_cover = 0.98,       # duplicates: min coverage of the shorter element,
+  dup_ident = 98,         #   min identity (%),
+  dup_len_diff = 0.01,    #   max length difference (fraction)
+  line_sub_cover = 0.98,  # LINEs contained in a better LINE: min coverage
+  line_sub_ident = 98,    #   and min identity (%)
+  anchor_cover = 0.9,     # 3'-anchored relatives: min coverage of the shorter element,
+  anchor_ident = 90,      #   min identity (%),
+  anchor_end = 30,        #   max distance of the match from the container's 3' end
+  tir_check_gap = 10,     # TIR finder: run where BLAST found no structure, or one this far from an end
+  tir_max_p = 0.01,       # TIR finder: max p-value
+  dirs_min_orf = 2000,    # DIRS: min longest ORF
+  dirs_max_len = 10000,   #   and max length
+  sine_max_len = 500,     # SINE: max length to pass
+  unknown_min_cluster = 5,# Unknown: passes with a cluster larger than this (or the kneedle cut)
+  ltr_tsd_min = 4,        # LTR TSD length range, for reclassifying Unknowns as LTR
+  ltr_tsd_max = 6,
+  tgca_tsd_conf = 0.8,    # Unknown with TG..CA ends: min TSD confidence to become LTR
+  unknown_tsd_conf = 0.3, # Unknown with an LTR or TIR: min TSD confidence to be reclassified
+  hat_tsd_len = 8,        # Unknown with a TIR and an 8 bp TSD becomes DNA
+  unknown_ltr_min_len = 150, # Unknown: min LTR length to become LTR
+  sine_reco_max_len = 400,# Unknown: becomes SINE if shorter than this
+  sine_reco_max_pa = 5    #   and with a polyA within this many bp of an end
+)
+
+
+
+###
 ### Auxiliary functions
 ###
 
@@ -329,7 +430,7 @@ parseONEview <- function(n) {
   ovret <- data.table(name = character(), seq = character(), lx = numeric(), rx = numeric())
   for (i in 1:n) {
     f <- paste0(opt$output_folder,"/pantera",i,".1aln")
-    system2("svfind", args = paste0(" -x 100 -s ", min(50, opt$min_size), " -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
+    system2("svfind", args = paste0(" -x ", svfind_flank, " -s ", min(50, opt$min_size), " -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
     if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
       ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
         if (nrow(ov)>0) {
@@ -570,14 +671,14 @@ read_clstr <- function(f) {
 }
 
 # Flank lengths (lx, rx) of segments by name, as reported by svfind.
-# Falls back to 100 (the -x given to svfind) for names not in the table.
+# Falls back to svfind_flank (the -x given to svfind) for names not in the table.
 seg_flank_lengths <- function(names) {
   if (!exists("seg_flanks", envir = globalenv()) || nrow(seg_flanks) == 0) {
-    return(data.table(lx = rep(100, length(names)), rx = rep(100, length(names))))
+    return(data.table(lx = rep(svfind_flank, length(names)), rx = rep(svfind_flank, length(names))))
   }
   fl <- seg_flanks[data.table(name = names), on = "name", mult = "first", .(lx, rx)]
-  fl[is.na(lx), lx := 100]
-  fl[is.na(rx), rx := 100]
+  fl[is.na(lx), lx := svfind_flank]
+  fl[is.na(rx), rx := svfind_flank]
   fl
 }
 
@@ -1031,7 +1132,7 @@ cluster_results <- function() {
       # < 3 kb with L-INS-i and up to 1000 refinement iterations. Same method here,
       # with at most -I iterations (default 1000, identical to --auto); other
       # clusters keep mafft --auto's choice.
-      small <- length(seqs) < 100 && max(lengths(clust_temp)) < 3000
+      small <- length(seqs) < loop2_cfg$small_n && max(lengths(clust_temp)) < loop2_cfg$small_len
       ali <- run_mafft(seqs,
                        method = if (small) "localpair" else "auto",
                        maxiterate = if (small) opt$align_iterations else 0,
@@ -1099,9 +1200,9 @@ cluster_results <- function() {
       ## coincidental match (confirmed necessary on a real LINE alignment where an
       ## unrelated 6bp conserved stretch sat ~220bp past the true element end).
       run_len <- get_sequence_value(nseqs)
-      lookahead <- 1000
-      min_cluster_total <- 10
-      small_gap <- 20
+      lookahead <- edges_cfg$lookahead
+      min_cluster_total <- edges_cfg$min_cluster_total
+      small_gap <- edges_cfg$small_gap
       
       x <- as.numeric(strsplit(consstring, "")[[1]])
       rl <- rle(x)
@@ -1142,13 +1243,13 @@ cluster_results <- function() {
       ##
       ## Null match probability p0: the previous code estimated it from the
       ## flank base composition, but counted only upper-case bases while the
-      ## aligned sequences are lower case, so it was always 0.25. That behaviour
-      ## is kept (use_local_composition = FALSE). Setting it to TRUE uses the real
-      ## flank composition, computed from the column counts in cMatrix.
-      tsd_max <- 13L
-      off_max <- 6L
+      ## aligned sequences are lower case, so it was always 0.25. With
+      ## tsd_cfg$local_composition TRUE (the default) it uses the real flank
+      ## composition, computed from the column counts in cMatrix; FALSE gives 0.25.
+      tsd_max <- tsd_cfg$max_len
+      off_max <- tsd_cfg$max_offset
       K <- tsd_max + off_max
-      use_local_composition <- TRUE
+      use_local_composition <- tsd_cfg$local_composition
       
       tail_cache <- new.env()
       head_cache <- new.env()
@@ -1192,7 +1293,7 @@ cluster_results <- function() {
       # bases next to the edges), keep lengths with >= 80% identity, and take the
       # length with the smallest binomial p-value (first one on ties).
       call_tsd_fast <- function(Lt, Rh, offl = 0L, offr = 0L, p0 = 0.25,
-                                min_len = 2L, min_identity = 0.8) {
+                                min_len = tsd_cfg$min_len, min_identity = tsd_cfg$min_identity) {
         n <- nrow(Lt)
         max_x <- pmin(tsd_max, rowSums(!is.na(Lt)) - offl, rowSums(!is.na(Rh)) - offr)
         best_p <- rep(Inf, n)
@@ -1211,7 +1312,7 @@ cluster_results <- function() {
       }
       # Most frequent significant TSD length (longest one on ties), the fraction of ALL
       # sequences that agree on it, and which sequences those are.
-      summarize_tsd <- function(calls, sig_threshold = 0.1) {
+      summarize_tsd <- function(calls, sig_threshold = tsd_cfg$sig_threshold) {
         sig <- which(!is.na(calls$tsd_len) & calls$pval <= sig_threshold)
         if (length(sig) == 0) return(list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0)))
         counts <- tabulate(calls$tsd_len[sig], nbins = tsd_max)
@@ -1220,7 +1321,7 @@ cluster_results <- function() {
              modal_conf = round(max(counts) / length(calls$tsd_len), 2),
              rows = sig[calls$tsd_len[sig] == modal_len])
       }
-      tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = 2) {
+      tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = tsd_cfg$motif_min_support) {
         k <- summ$modal_len
         if (is.na(k) || length(summ$rows) < min_support) return("")
         l_side <- apply(Lt[summ$rows, (K - offl - k + 1):(K - offl), drop = FALSE], 1, paste, collapse = "")
@@ -1243,8 +1344,8 @@ cluster_results <- function() {
       ## and, in the shift search, by the number of edge positions tried. Without
       ## that, a 3-copy cluster finds a chance 2 bp "TSD" (2 of 3 copies) somewhere
       ## in the ~600 candidates almost every time.
-      tsd_alpha <- 0.05
-      tsd_pvalue <- function(summ, p0, n = nseqs, min_identity = 0.8) {
+      tsd_alpha <- tsd_cfg$alpha
+      tsd_pvalue <- function(summ, p0, n = nseqs, min_identity = tsd_cfg$min_identity) {
         L <- summ$modal_len
         if (is.na(L)) return(1)
         q <- stats::pbinom(ceiling(min_identity * L - 1e-9) - 1, L, p0, lower.tail = FALSE)
@@ -1267,8 +1368,8 @@ cluster_results <- function() {
       ## 2bp match) - there is no well-defined maximum to chase there, and
       ## chasing one anyway means sliding arbitrarily deep into real element
       ## sequence.
-      shift_range <- -12:12
-      min_core <- 20   # never shrink the core below this many columns
+      shift_range <- -tsd_cfg$max_shift:tsd_cfg$max_shift
+      min_core <- tsd_cfg$min_core   # never shrink the core below this many columns
       baseline <- score_candidate(cons_s_raw, cons_e_raw)
       all_results <- list(`0_0` = list(ds = 0, de = 0, cons_s = cons_s_raw, cons_e = cons_e_raw,
                                        score = baseline$score, calls = baseline$calls, summary = baseline$summary,
@@ -1287,7 +1388,7 @@ cluster_results <- function() {
         }
       }
       
-      adequate_support <- 0.65   # at least ~2/3 of sequences must independently agree on one TSD
+      adequate_support <- tsd_cfg$adequate_support   # at least ~2/3 of sequences must independently agree on one TSD
       # length before a shift is trusted at all
       
       ## An inward shift turns element columns into flank. A TSD pulled into the raw
@@ -1333,7 +1434,7 @@ cluster_results <- function() {
       ## shifting length, several bases out). So: only extend the anchor by one
       ## step if that step is itself well-supported AND the step immediately
       ## beyond it collapses.
-      collapse_below <- 0.15
+      collapse_below <- tsd_cfg$collapse_below
       directions <- list(c(-1, 0), c(1, 0), c(0, -1), c(0, 1))
       extension <- NULL
       for (dir in directions) {
@@ -1382,8 +1483,8 @@ cluster_results <- function() {
       ## than a majority-fraction threshold, and among offsets clearing that
       ## count, take the smallest total offset (same repeat-plateau risk as the
       ## boundary search applies here too).
-      strict_pval <- 0.01
-      min_strict_count <- 6
+      strict_pval <- tsd_cfg$strict_pval
+      min_strict_count <- tsd_cfg$min_strict_count
       p0_final <- p0_for(cons_s, cons_e)
       offset_candidates <- list()
       for (offl in 0:off_max) {
@@ -1445,8 +1546,8 @@ cluster_results <- function() {
     cons <- gsub("-","",cons)
     nam <- paste0(">CONS-", start, "-", end, "-",u, "-", 
                   nchar(cons), "_clus",  length(clust_temp), "_tsdl",tsd_len , "_tsdc",tsds_conf, "_tsdm",tsds_motif, "_gens",gencounts,"@@")
-    if ((nchar(cons) >= max(100, opt$min_size)) &
-        (alll-cutl) > 180) {  # Remove clusters that include the edges, they are most likely segdups
+    if ((nchar(cons) >= max(loop2_cfg$min_cons_len, opt$min_size)) &
+        (alll-cutl) > loop2_cfg$min_trimmed) {  # Remove clusters that include the edges, they are most likely segdups
       result <- data.table(name = nam, seq = cons)
       alim <- data.table(name=names(alim),seq=case_flanks(names(alim), alim))
       alim[,name:=paste0(">",gsub(">","",name))]
@@ -1514,12 +1615,12 @@ cluster_results <- function() {
     return(jobs)
   }
   
-  zones_interval <- 300
-  zones_interval_overlap <- 0
-  cons_threshold <- 0.3
-  conserv_threshold <- 0.8
-  sat_threshold <- 0.4
-  opt$max_cluster <- 1000
+  zones_interval <- loop2_cfg$window
+  zones_interval_overlap <- loop2_cfg$window_overlap
+  cons_threshold <- loop2_cfg$cons_threshold
+  conserv_threshold <- loop2_cfg$conserv_threshold
+  sat_threshold <- loop2_cfg$sat_threshold
+  opt$max_cluster <- loop2_cfg$max_cluster
   segments_unique <- ffasta("segments_candidates.fa")
   if (nrow(segments_unique) > 0) {
     lx(paste("Total Unique segments:", nrow(segments_unique)))
@@ -1691,7 +1792,7 @@ classify_tes <- function() {
   # Keep the classifier's own call for curators, whatever its probability
   final[, `:=`(hom_class = fifelse(is.na(Prediction), "none", Prediction),
                hom_prob  = fifelse(is.na(Probability), 0, round(Probability, 3)))]
-  final[is.na(Prediction) | is.na(Probability) | Probability < 0.4, Prediction := "Unknown"]
+  final[is.na(Prediction) | is.na(Probability) | Probability < class_cfg$min_prob, Prediction := "Unknown"]
   final <- final[order(-nchar(seq))]
   # Working name: unique id + class. Final names are set at the end of stats_tes().
   final[, name := paste0(name, "#", Prediction)]
@@ -1741,7 +1842,7 @@ stats_tes <- function() {
                            "gapopen", "qstart", "qend", "sstart", "send",
                            "evalue", "bitscore")
     te_data_mix <- te_data[qseqid != sseqid] # Non self matches, to deal with later
-    te_data_rep <- te_data[qseqid == sseqid & length > 20 &
+    te_data_rep <- te_data[qseqid == sseqid & length > rules_cfg$self_rep_min &
                              (qstart != sstart | qend != send)][, .(N = .N, maxRep = max(length)), qseqid] # large self matches that are not trivial. To filter with MaxRep.
     te_data <- te_data[!(qseqid == sseqid & qstart == sstart & qend == send)] # Self matches that are not the whole element, to check for TIR and LTR
     ### TIR, LTR detection
@@ -1765,8 +1866,8 @@ stats_tes <- function() {
     ### TIR, LTR detection END
     
     # Mark as PASS LTR and TIR elements matching their class.
-    good_ltr <- te_data[grepl("#LTR", qseqid) & type == "LTR" & lgap < 8 & rgap < 8 & length > 100]$qseqid
-    good_tir <- te_data[grepl("#DNA", qseqid) & type == "TIR" & lgap < 8 & rgap < 8]$qseqid
+    good_ltr <- te_data[grepl("#LTR", qseqid) & type == "LTR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap & length > rules_cfg$ltr_min_len]$qseqid
+    good_tir <- te_data[grepl("#DNA", qseqid) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap]$qseqid
     
     tes <- merge(tes[, name := gsub(">", "", name)],
                  te_data[, c("qseqid", "length", "lgap", "rgap", "type")],
@@ -1783,8 +1884,9 @@ stats_tes <- function() {
     tes[, pa := min(pas, eas), by = .I]
     tes[substr(seq, 1, 5) == "AAAAA" | substr(seq, 1, 5) == "TTTTT" | substr(seq, lente - 4, lente) == "AAAAA" | substr(seq, lente - 4, lente) == "TTTTT", pa := 0, by = .I]
     
-    good_line <- tes[grepl("LINE", name) & orf1 > 1600 &
-                       (pa < 10 | tail3_len > 0 | is.na(type) | (lgap > 10 & rgap > 10))]$name
+    good_line <- tes[grepl("LINE", name) & orf1 > rules_cfg$line_min_orf &
+                       (pa < rules_cfg$line_max_pa | tail3_len > 0 | is.na(type) |
+                          (lgap > rules_cfg$line_inner_gap & rgap > rules_cfg$line_inner_gap))]$name
     
     # Find elements which share TIR or LTR to good ones.
     te_data_mix <- merge(te_data_mix,
@@ -1801,7 +1903,8 @@ stats_tes <- function() {
     te_data_mix[, rsgap := .(lente.y - max(sstart, send)), by = .I]
     ## Remove dups
     te_data_mix[, cover := length / min(lente.x, lente.y), by = .I]
-    te_data_dups <- te_data_mix[cover > 0.98 & pident > 98 & abs((lente.y - lente.x) / max(lente.y, lente.x)) < 0.01]
+    te_data_dups <- te_data_mix[cover > rules_cfg$dup_cover & pident > rules_cfg$dup_ident &
+                                  abs((lente.y - lente.x) / max(lente.y, lente.x)) < rules_cfg$dup_len_diff]
     te_data_dups[, uname := paste0(c(qseqid, sseqid)[order(c(qseqid, sseqid))], collapse = ""), .I]
     te_data_dups <- te_data_dups[order(cluster.x - cluster.y)]
     dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
@@ -1813,8 +1916,9 @@ stats_tes <- function() {
     ## end of the longer (container) element is its right end; the shorter one can be in
     ## either orientation, since its own longest ORF may be on the other strand. The
     ## container gets the number of such relatives, each relative the container's id.
-    anch <- te_data_mix[lente.x < lente.y & length / lente.x >= 0.9 & pident >= 90 &
-                          pmax(sstart, send) >= lente.y - 30]
+    anch <- te_data_mix[lente.x < lente.y & length / lente.x >= rules_cfg$anchor_cover &
+                          pident >= rules_cfg$anchor_ident &
+                          pmax(sstart, send) >= lente.y - rules_cfg$anchor_end]
     tes[, `:=`(tr3_relatives = 0L, fragment_of = NA_character_)]
     if (nrow(anch) > 0) {
       rel <- anch[, .(n = uniqueN(qseqid)), by = sseqid]
@@ -1825,10 +1929,10 @@ stats_tes <- function() {
     lx(paste("Elements with 3'-anchored shorter relatives:", sum(tes$tr3_relatives > 0),
              "; elements that are 3' fragments of a longer one:", sum(!is.na(tes$fragment_of))))
     # A LINE whose 3' end is shared by truncated copies is supported even without a tail
-    good_line <- union(good_line, tes[grepl("LINE", name) & orf1 > 1600 & tr3_relatives > 0]$name)
+    good_line <- union(good_line, tes[grepl("LINE", name) & orf1 > rules_cfg$line_min_orf & tr3_relatives > 0]$name)
     
     ## Generate list of LINEs that are subsequence of a better one
-    te_data_mix_line <- te_data_mix[(grepl("LINE", qseqid) | grepl("LINE", sseqid)) & pident > 98 & cover > 0.98]
+    te_data_mix_line <- te_data_mix[(grepl("LINE", qseqid) | grepl("LINE", sseqid)) & pident > rules_cfg$line_sub_ident & cover > rules_cfg$line_sub_cover]
     te_data_mix_line[, large := qseqid]
     te_data_mix_line[lente.y > lente.x, large := sseqid]
     
@@ -1841,7 +1945,9 @@ stats_tes <- function() {
     }
     
     ### Find TIR elements that can be reclassified
-    te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) & lsgap < 8 & rsgap < 8 & lqgap < 8 & rqgap < 8]
+    te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) &
+                                     lsgap < rules_cfg$end_gap & rsgap < rules_cfg$end_gap &
+                                     lqgap < rules_cfg$end_gap & rqgap < rules_cfg$end_gap]
     tir_reco1 <- te_data_mix_tir[!grepl("DNA", qseqid) & grepl("DNA", sseqid)]
     tir_reco2 <- te_data_mix_tir[!grepl("DNA", sseqid) & grepl("DNA", qseqid)]
     tir_reco <- data.table(name = c(tir_reco1$qseqid, tir_reco2$sseqid), sf = gsub(".*#", "", c(tir_reco1$sseqid, tir_reco2$qseqid)))
@@ -1851,7 +1957,9 @@ stats_tes <- function() {
     tes[tir_reco, on = "name", name := i.new]
     
     ### Find LTR elements that can be reclassified
-    te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) & ((lsgap < 8 & rsgap < 8) | (lqgap < 8 & rqgap < 8))]
+    te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) &
+                                     ((lsgap < rules_cfg$end_gap & rsgap < rules_cfg$end_gap) |
+                                        (lqgap < rules_cfg$end_gap & rqgap < rules_cfg$end_gap))]
     ltr_reco1 <- te_data_mix_ltr[!grepl("LTR", qseqid) & grepl("LTR", sseqid)]
     ltr_reco2 <- te_data_mix_ltr[!grepl("LTR", sseqid) & grepl("LTR", qseqid)]
     ltr_reco <- data.table(name = c(ltr_reco1$qseqid, ltr_reco2$sseqid), sf = gsub(".*#", "", c(ltr_reco1$sseqid, ltr_reco2$qseqid)))
@@ -1869,15 +1977,15 @@ stats_tes <- function() {
     
     ### Terminal inverted repeats (replaces the old short_tir heuristic).
     # Only checked where BLAST found no structure, or found one away from the ends
-    # (gap >= 10 bp on either side). A significant terminal TIR then replaces the
+    # (gap >= rules_cfg$tir_check_gap on either side). A significant terminal TIR then replaces the
     # structure call. Runs before every rule below that uses `type`.
     tes[, c("length", "lgap", "rgap") := lapply(.SD, as.numeric), .SDcols = c("length", "lgap", "rgap")]
-    cand <- tes[, which(is.na(type) | lgap >= 10 | rgap >= 10)]
+    cand <- tes[, which(is.na(type) | lgap >= rules_cfg$tir_check_gap | rgap >= rules_cfg$tir_check_gap)]
     if (length(cand) > 0) {
       tir_res <- mclapply(tes$seq[cand], find_terminal_tir, mc.cores = opt$threads)
       check_tasks(tir_res, "TIR search", tes$name[cand])
       tir_res <- rbindlist(tir_res)
-      sig <- which(tir_res$tir_p <= 0.01)
+      sig <- which(tir_res$tir_p <= rules_cfg$tir_max_p)
       if (length(sig) > 0) {
         tes[cand[sig], `:=`(type = "TIR", length = tir_res$tir_len[sig],
                             lgap = tir_res$tir_lgap[sig], rgap = tir_res$tir_rgap[sig])]
@@ -1886,45 +1994,48 @@ stats_tes <- function() {
     }
     
     tes[name %in% good_line[!(good_line %in% small_line)], pass := T]
-    tes[grepl("DIRS", name) & (orf1 > 2000) & (lente < 10000), pass := T]
+    tes[grepl("DIRS", name) & (orf1 > rules_cfg$dirs_min_orf) & (lente < rules_cfg$dirs_max_len), pass := T]
     tes[grepl("Crypton", name), pass := T]
     tes[grepl("#PLE", name), pass := T]
-    tes[grepl("#SINE", name) & lente < 500, pass := T]
+    tes[grepl("#SINE", name) & lente < rules_cfg$sine_max_len, pass := T]
     tes[name %in% good_ltr, pass := T]
     tes[name %in% ltr_reco$new, pass := T]
     tes[name %in% good_tir, pass := T]
     # DNA elements with a TIR near both ends, including TIRs found by the terminal-TIR
     # finder (good_tir only knows the BLAST calls made before that step)
-    tes[grepl("#DNA", name) & type == "TIR" & lgap < 8 & rgap < 8, pass := T]
+    tes[grepl("#DNA", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, pass := T]
     tes[name %in% tir_reco$new, pass := T]
     tes[grepl("#RC", name), pass := T]
     ucut <- tryCatch(kneedle(tes[, .N, cluster]$cluster, tes[, .N, cluster]$N)[1],
                      error = function(e) NA)
-    if (length(ucut) == 0 || is.na(ucut)) ucut <- 5
+    if (length(ucut) == 0 || is.na(ucut)) ucut <- rules_cfg$unknown_min_cluster
     lx(paste("Unknown recovery cutpoint:", ucut))
-    tes[grepl("#Unknown", name) & cluster > max(5, ucut), pass := T]
+    tes[grepl("#Unknown", name) & cluster > max(rules_cfg$unknown_min_cluster, ucut), pass := T]
     tes[name %in% small_line, pass := F]
     # This should go at the end of the filters
     tes[is.na(pa), pa := 100]
-    tes[, TR2 := maxRep > lente / 2.5]
+    tes[, TR2 := maxRep > lente / rules_cfg$tandem_frac]
     tes[is.na(TR2), TR2 := F]
-    tes[TR2 == T & type == "LTR" & maxRep > 100, pass := F]
-    tes[type == "TIR" & lgap < 3 & rgap < 3, pass := T]
+    tes[TR2 == T & type == "LTR" & maxRep > rules_cfg$tandem_ltr_max, pass := F]
+    tes[type == "TIR" & lgap < rules_cfg$tight_gap & rgap < rules_cfg$tight_gap, pass := T]
     # Reclassification by TSDs
     tg_ca <- tes[, grepl("#Unknown", name) & substr(seq, 1, 2) == "TG" &
                    substr(seq, lente - 1, lente) == "CA" &
-                   tsd_l >= 4 & tsd_l <= 6 & tsd_c > 0.8]
+                   tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c > rules_cfg$tgca_tsd_conf]
     tes[tg_ca, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T)]
     lx(paste("Unknown elements reclassified as LTR by TG..CA termini and TSD:", sum(tg_ca)))
     
-    tes[grepl("#Unknown", name) & type == "TIR" & tsd_l == 8 & tsd_c > 0.3 & lgap < 8 & rgap < 8, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
-    tes[grepl("#Unknown", name) & type == "TIR" & lgap < 8 & rgap < 8, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
-    tes[grepl("#Unknown", name) & tsd_l > 3 & tsd_l < 7 & tsd_c > 0.3 & type == "LTR" & length > 150 & lgap < 8 & rgap < 8 & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & type == "TIR" & tsd_l == rules_cfg$hat_tsd_len & tsd_c > rules_cfg$unknown_tsd_conf &
+        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max &
+        tsd_c > rules_cfg$unknown_tsd_conf & type == "LTR" & length > rules_cfg$unknown_ltr_min_len &
+        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T), by = .I]
     # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
-    tes[grepl("#Unknown", name) & lente < 400 & pa < 5 & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T), by = .I]
+    tes[grepl("#Unknown", name) & lente < rules_cfg$sine_reco_max_len & pa < rules_cfg$sine_reco_max_pa & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T), by = .I]
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
     tes[Ns > (nchar(seq) * opt$max_cons_ns), pass := F]
-    tes[grepl("#LINE", name) & maxRep > 50, pass := T]
+    tes[grepl("#LINE", name) & maxRep > rules_cfg$line_rescue_rep, pass := T]
     
   } else {
     tes[, name := gsub(">", "", name)]
@@ -2039,8 +2150,8 @@ cleanup <- function() {
 ###
 
 # Internal globals 
-zones_interval <- 60
-zones_interval_overlap <- 30
+zones_interval <- loop1_cfg$window
+zones_interval_overlap <- loop1_cfg$window_overlap
 current <- getwd()
 
 invisible(tryCatch({get_libs()}, error = function(err) {

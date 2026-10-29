@@ -7,6 +7,9 @@
 - Loop 2 no longer stops the run when a cluster's alignment has no conserved block, or when a cluster holds a single sequence (possible only with `-m 1`): the cluster gives no consensus. Both cases used an R `next` outside a loop and would have stopped the run with an error; neither happened in the test runs.
 - Log typos: "Processing N alignments" (was "Procesing"), "successfully". `scripts/compare_runs.sh` accepts both spellings.
 
+### Changed
+- Internal thresholds that are not command-line options (loop 1 and 2 windows, consensus, edge and TSD search, classification probability, structure rules) are grouped in named settings near the top of the script, each with a short description. Results are unchanged.
+
 ### Removed
 - Unused function `cdhit1` and commented-out code.
 
