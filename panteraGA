@@ -7,6 +7,16 @@
 pantera_version <- "1.4.0"
 options(warn = 0)
 
+# In containers (Apptainer/Singularity), /etc/localtime is often a copy of the
+# host's zone file rather than a symlink. Local times are still correct, but R
+# cannot name the zone and warns. Pointing TZ at the file keeps the host's local
+# time and avoids the warnings. Only done when TZ is unset and /etc/localtime is
+# a regular file, so normal systems are not affected.
+if (!nzchar(Sys.getenv("TZ")) && file.exists("/etc/localtime") &&
+    !nzchar(Sys.readlink("/etc/localtime"))) {
+  Sys.setenv(TZ = ":/etc/localtime")
+}
+
 
 ###
 ### Locate the installation folder (the one containing libs/ and model/).

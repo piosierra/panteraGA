@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- No more R warnings "'/etc/localtime' is not a symlink" / "is not identical to any known timezone file" when running in a container: if `TZ` is unset and `/etc/localtime` is a regular file, panteraGA uses it directly (`TZ=:/etc/localtime`), keeping the host's local time.
+
 ## [1.4.0]
 
 ### Added
