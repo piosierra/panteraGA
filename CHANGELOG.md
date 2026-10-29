@@ -10,6 +10,11 @@
 - Stats file: column `reason`, after `pass`: the rule that accepted or rejected the element (the last rule that decided, since rules run in order and later ones overwrite earlier ones).
 - Stats file: column `TSD_pvalue`, after `TSD_motif`: the p-value of the reported TSD (agreement between copies beyond chance, corrected for the TSD lengths tried). Empty when no TSD is reported. The consensus names in intermediate files carry it as `_tsdp`.
 
+### Changed (rules)
+- Contained elements are rejected as the last step, so no rule can accept them again: an element covered over at least 98% of its length, at 98% identity or more, by one hit of a longer accepted LINE, LTR, PLE or RC element (not DNA). The reason names the container. This replaces the previous step, which applied only to elements contained in LINEs (at more than 98%) and could be overridden by later rules.
+- LINEs that are mostly a repeat of themselves (longest self-match, `maxTR`, over 40% of their length) are rejected, as LTR-structure elements already were. This replaces the rule that accepted every LINE with `maxTR` over 50 bp, after all other filters (including Ns and containment).
+- Removed: the rule accepting any element with TIRs within 3 bp of both ends, whatever its class (DNA and Unknown elements with TIRs are accepted by their own rules), and the rule making Unknowns with TIRs and an 8 bp TSD DNA (the next rule made every Unknown with TIRs DNA anyway).
+
 ### Fixed
 - `-i/--identity1` and `-y/--identity2` must be between 0.8 and 1. cd-hit-est refuses lower identities with the word length panteraGA uses, and the run stopped later with a misleading error ("cannot open the connection"). Values outside the range now stop the run at the start, with a message naming the option.
 - A TSD length found in a single copy no longer counts as a TSD. A long chance match in one copy (e.g. 11 bp in 1 of 5 copies) passed the significance test, and its length was reported with confidence 0 and no motif. The minimum number of copies sharing a TSD length is now 2 (`tsd_cfg$min_support`, also used for the motif). In the test data, two SINEs lose such 10-11 bp "TSDs"; nothing else changes.

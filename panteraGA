@@ -105,20 +105,19 @@ class_cfg <- list(
 # "gap" is the distance in bp from a terminal repeat (LTR or TIR) to the element end.
 rules_cfg <- list(
   end_gap = 8,            # max gap for a terminal repeat to count as being at the ends
-  tight_gap = 3,          # any element with a TIR within this gap of both ends passes
   ltr_min_len = 100,      # min LTR length for an element classified as LTR
   self_rep_min = 20,      # min length of an internal self-match counted in maxTR
-  tandem_frac = 2.5,      # maxTR > length / tandem_frac marks an element as mostly tandem repeat
-  tandem_ltr_max = 100,   #   LTR elements with such a repeat longer than this fail
+  tandem_frac = 2.5,      # maxTR > length / tandem_frac: element mostly a repeat of itself;
+  tandem_ltr_max = 100,   #   rejected if it is a LINE, or has an LTR structure and maxTR > this
   line_min_orf = 1600,    # min longest ORF for a LINE
   line_max_pa = 10,       # LINE: max distance of a polyA from an end
   line_inner_gap = 10,    # LINE: also passes if its self-match is more than this from both ends
-  line_rescue_rep = 50,   # LINE: passes if maxTR is larger than this (applied last)
   dup_cover = 0.98,       # duplicates: min coverage of the shorter element,
   dup_ident = 98,         #   min identity (%),
   dup_len_diff = 0.01,    #   max length difference (fraction)
-  line_sub_cover = 0.98,  # LINEs contained in a better LINE: min coverage
-  line_sub_ident = 98,    #   and min identity (%)
+  contain_cover = 0.98,   # contained elements: min fraction of their length matched
+  contain_ident = 98,     #   by one hit of a longer accepted element, at min identity (%),
+  contain_classes = c("LINE", "LTR", "PLE", "RC"),  # of these classes (not DNA): rejected
   anchor_cover = 0.9,     # 3'-anchored relatives: min coverage of the shorter element,
   anchor_ident = 90,      #   min identity (%),
   anchor_end = 30,        #   max distance of the match from the container's 3' end
@@ -131,8 +130,7 @@ rules_cfg <- list(
   ltr_tsd_min = 4,        # LTR TSD length range, for reclassifying Unknowns as LTR
   ltr_tsd_max = 6,
   tgca_tsd_conf = 0.8,    # Unknown with TG..CA ends: min TSD confidence to become LTR
-  unknown_tsd_conf = 0.3, # Unknown with an LTR or TIR: min TSD confidence to be reclassified
-  hat_tsd_len = 8,        # Unknown with a TIR and an 8 bp TSD becomes DNA
+  unknown_tsd_conf = 0.3, # Unknown with an LTR: min TSD confidence to become LTR
   unknown_ltr_min_len = 150, # Unknown: min LTR length to become LTR
   sine_reco_max_len = 400,# Unknown: becomes SINE if shorter than this
   sine_reco_max_pa = 5    #   and with a polyA within this many bp of an end
@@ -1884,6 +1882,7 @@ stats_tes <- function(final, genomes) {
              tail5_motif = t5$tail_motif, tail5_len = t5$tail_len)]
   wfasta(tes[, c("name", "seq")], tmp_tes)
   system(paste0("makeblastdb -in ", shQuote(tmp_tes), " -dbtype nucl 1> /dev/null"))
+  contain_pairs <- data.table(small = character(), big = character())
   te_data <- fread(cmd = paste0("blastn -query ", shQuote(tmp_tes), " -db ", shQuote(tmp_tes),
                                 " -task blastn -num_threads ",
                                 opt$threads, " -mt_mode 1",
@@ -1982,18 +1981,15 @@ stats_tes <- function(final, genomes) {
     # A LINE whose 3' end is shared by truncated copies is supported even without a tail
     good_line <- union(good_line, tes[grepl("LINE", name) & orf1 > rules_cfg$line_min_orf & tr3_relatives > 0]$name)
     
-    ## Generate list of LINEs that are subsequence of a better one
-    te_data_mix_line <- te_data_mix[(grepl("LINE", qseqid) | grepl("LINE", sseqid)) & pident > rules_cfg$line_sub_ident & cover > rules_cfg$line_sub_cover]
-    te_data_mix_line[, large := qseqid]
-    te_data_mix_line[lente.y > lente.x, large := sseqid]
-    
-    small_line <- c()
-    for (l in tes[name %in% good_line][order(-lente)]$name) {
-      matches <- unique(c(te_data_mix_line[large == l]$qseqid, te_data_mix_line[large == l]$sseqid))
-      matches <- matches[matches != l]
-      small_line <- c(small_line, matches)
-      te_data_mix_line <- te_data_mix_line[!(qseqid %in% matches | sseqid %in% matches)]
-    }
+    ## Containment: pairs where one hit of the longer element (big) covers at least
+    ## contain_cover of the shorter one's (small) length at contain_ident or more.
+    ## Applied at the very end, once it is known which elements are accepted.
+    cp <- te_data_mix[lente.x != lente.y & pident >= rules_cfg$contain_ident]
+    cp[, q_small := lente.x < lente.y]
+    cp[, span := fifelse(q_small, abs(qend - qstart) + 1, abs(send - sstart) + 1) / pmin(lente.x, lente.y)]
+    contain_pairs <- unique(cp[span >= rules_cfg$contain_cover,
+                               .(small = gsub("#.*", "", fifelse(q_small, qseqid, sseqid)),
+                                 big = gsub("#.*", "", fifelse(q_small, sseqid, qseqid)))])
     
     ### Find TIR elements that can be reclassified
     te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) &
@@ -2047,7 +2043,7 @@ stats_tes <- function(final, genomes) {
       lx(paste("Terminal TIRs detected:", length(sig), "of", length(cand), "elements checked"))
     }
     
-    tes[name %in% good_line[!(good_line %in% small_line)], `:=`(pass = T, reason = "LINE: long ORF, with a tail or no terminal repeat")]
+    tes[name %in% good_line, `:=`(pass = T, reason = "LINE: long ORF, with a tail or no terminal repeat")]
     tes[grepl("DIRS", name) & (orf1 > rules_cfg$dirs_min_orf) & (lente < rules_cfg$dirs_max_len), `:=`(pass = T, reason = "DIRS: long ORF")]
     tes[grepl("Crypton", name), `:=`(pass = T, reason = "Crypton")]
     tes[grepl("#PLE", name), `:=`(pass = T, reason = "PLE")]
@@ -2065,13 +2061,11 @@ stats_tes <- function(final, genomes) {
     if (length(ucut) == 0 || is.na(ucut)) ucut <- rules_cfg$unknown_min_cluster
     lx(paste("Unknown recovery cutpoint:", ucut))
     tes[grepl("#Unknown", name) & cluster > max(rules_cfg$unknown_min_cluster, ucut), `:=`(pass = T, reason = "Unknown: large cluster")]
-    tes[name %in% small_line, `:=`(pass = F, reason = "contained in a longer LINE")]
     # This should go at the end of the filters
     tes[is.na(pa), pa := 100]
     tes[, TR2 := maxRep > lente / rules_cfg$tandem_frac]
     tes[is.na(TR2), TR2 := F]
     tes[TR2 == T & type == "LTR" & maxRep > rules_cfg$tandem_ltr_max, `:=`(pass = F, reason = "LTR structure, mostly tandem repeat")]
-    tes[type == "TIR" & lgap < rules_cfg$tight_gap & rgap < rules_cfg$tight_gap, `:=`(pass = T, reason = "TIRs at both ends")]
     # Reclassification by TSDs
     tg_ca <- tes[, grepl("#Unknown", name) & substr(seq, 1, 2) == "TG" &
                    substr(seq, lente - 1, lente) == "CA" &
@@ -2080,9 +2074,6 @@ stats_tes <- function(final, genomes) {
                     reason = "Unknown to LTR: TG..CA ends and TSD")]
     lx(paste("Unknown elements reclassified as LTR by TG..CA termini and TSD:", sum(tg_ca)))
     
-    tes[grepl("#Unknown", name) & type == "TIR" & tsd_l == rules_cfg$hat_tsd_len & tsd_c > rules_cfg$unknown_tsd_conf &
-        lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T,
-        reason = "Unknown to DNA: TIRs and 8 bp TSD"), by = .I]
     tes[grepl("#Unknown", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(name = paste0(gsub("#.*", "", name), "#DNA"), pass = T,
         reason = "Unknown to DNA: TIRs"), by = .I]
     tes[grepl("#Unknown", name) & tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max &
@@ -2094,7 +2085,7 @@ stats_tes <- function(final, genomes) {
         reason = "Unknown to SINE: short, with polyA"), by = .I]
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
     tes[Ns > (nchar(seq) * opt$max_cons_ns), `:=`(pass = F, reason = "too many Ns")]
-    tes[grepl("#LINE", name) & maxRep > rules_cfg$line_rescue_rep, `:=`(pass = T, reason = "LINE: internal repeat (maxTR)")]
+    tes[grepl("#LINE", name) & TR2 == T, `:=`(pass = F, reason = "LINE, mostly a repeat of itself (maxTR)")]
     
   } else {
     tes[, name := gsub(">", "", name)]
@@ -2127,6 +2118,24 @@ stats_tes <- function(final, genomes) {
   gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, genomes)}))
   gmax <- apply(gtab, 1, max)
   tes[gmax < opt$min_copies, `:=`(pass = F, reason = "too few copies in every genome (-e)")]
+  ## Contained elements: an element covered over most of its length, at high identity,
+  ## by one hit of a longer accepted LINE, LTR, PLE or RC element is redundant and is
+  ## rejected. This is the last decision, so no rule can accept it again. Containers
+  ## are taken from the longest down; an element rejected here rejects no others.
+  if (nrow(contain_pairs) > 0) {
+    top_cls <- gsub("/.*", "", gsub(".*#", "", tes$name))
+    n_contained <- 0
+    for (b in tes$work_id[tes$pass & top_cls %in% rules_cfg$contain_classes]) {   # tes is sorted by length
+      bi <- which(tes$work_id == b)
+      if (!tes$pass[bi]) next
+      inside <- which(tes$work_id %in% contain_pairs[big == b]$small & tes$pass)
+      if (length(inside) > 0) {
+        tes[inside, `:=`(pass = F, reason = paste("contained in", sub("^>", "", tes$name[bi])))]
+        n_contained <- n_contained + length(inside)
+      }
+    }
+    lx(paste("Elements rejected as contained in a longer accepted LINE, LTR, PLE or RC element:", n_contained))
+  }
   lx(paste("Elements accepted:", nrow(tes[pass == TRUE]), "; rejected:", nrow(tes[pass == FALSE])))
   # The library holds the accepted elements; the rejected ones go to their own file
   # (their reasons are in the stats file, which lists both)
