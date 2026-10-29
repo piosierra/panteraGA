@@ -424,8 +424,10 @@ kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
   return(c(as.numeric(x),as.numeric(y)))
 }
 
-# Reads the two ONEcode files extracted from a 1aln file with svfind
-parseONEview <- function(n) {
+# Reads the two ONEcode files extracted from each 1aln file with svfind.
+# genomes: genome file names (without folders), in the order of the alignments.
+parseONEview <- function(genomes) {
+  n <- length(genomes)
   lx(paste("Processing", n, "alignments"))
   ovret <- data.table(name = character(), seq = character(), lx = numeric(), rx = numeric())
   for (i in 1:n) {
@@ -492,6 +494,9 @@ parseONEview <- function(n) {
   }
   return(ovret)
 }
+
+# Path of a file in the output folder
+outf <- function(...) file.path(opt$output_folder, ...)
 
 # Reverse complement of a DNA sequence
 rc <- function(s) {
@@ -673,7 +678,7 @@ read_clstr <- function(f) {
 # Flank lengths (lx, rx) of segments by name, as reported by svfind.
 # Falls back to svfind_flank (the -x given to svfind) for names not in the table.
 seg_flank_lengths <- function(names) {
-  if (!exists("seg_flanks", envir = globalenv()) || nrow(seg_flanks) == 0) {
+  if (nrow(seg_flanks) == 0) {
     return(data.table(lx = rep(svfind_flank, length(names)), rx = rep(svfind_flank, length(names))))
   }
   fl <- seg_flanks[data.table(name = names), on = "name", mult = "first", .(lx, rx)]
@@ -705,26 +710,28 @@ case_flanks <- function(names, aligned) {
   }, aligned, left, right, USE.NAMES = FALSE)
 }
 
-# Calls cdhit with alternative options
-cdhit2 <- function(sequences, threshold) {
+# Clusters segments with cd-hit-est. Temporary files go to folder `dir`.
+cdhit2 <- function(sequences, threshold, dir) {
   tseqs <- copy(sequences)
   # make.names: sequence names contain the genome path from the list (e.g. "dir/genome.fa"),
   # and a "/" in the temporary file name makes cd-hit fail
-  fname <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",tseqs[1]$name), collapse=""))
+  base <- make.names(paste0(stri_rand_strings(1, 12, '[A-Z]'),gsub(">","",tseqs[1]$name), collapse=""))
+  fname <- file.path(dir, base)
+  clname <- file.path(dir, paste0("cl", base))
   # Cluster on the insertions only: remove each segment's own flanks
   fl <- seg_flank_lengths(tseqs$name)
   tseqs[, seq := substr(seq, fl$lx + 1, nchar(seq) - fl$rx)]
   wfasta(tseqs[,1:2],fname)
-  system(paste0("cd-hit-est -G 0 -A 40 -n 8 -g 1 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ",fname, " -c ", threshold, " -o cl",fname, collapse = ""), ignore.stdout = T)
-  hitcl <- read_clstr(paste0("cl",fname,".clstr", collapse = ""))
-  unlink(fname)
-  unlink(paste0("cl",fname,".clstr", collapse = ""))
-  unlink(paste0("cl",fname, collapse = ""))
+  system(paste0("cd-hit-est -G 0 -A 40 -n 8 -g 1 -T 1 -aL 0.8 -aS 0.9 -d 0 -i ", shQuote(fname),
+                " -c ", threshold, " -o ", shQuote(clname)), ignore.stdout = T)
+  hitcl <- read_clstr(paste0(clname, ".clstr"))
+  unlink(c(fname, paste0(clname, ".clstr"), clname))
   hitcl[,name:=gsub("\\.\\.\\.","",name)]
 } 
 
 # Get number of instances by genome for each TE
-getgenomes <- function(input_string, n) { 
+getgenomes <- function(input_string, genomes) {
+  n <- length(genomes)
   values_str <- gsub("^#|#", "", input_string)
   numbers <- strsplit(values_str, "\\s*---\\s*")[[1]]
   keys <- numbers[seq(1, length(numbers), by = 2)]
@@ -811,19 +818,16 @@ init_pantera <- function() {
 }
 
 
-# Obtains and stores the polymorphic segments
-read_poly <- function(ngen) {
-  if (!file.exists(paste0("all_segments.fa"))) {
-    segments_unique <- parseONEview(ngen)
-    segments_unique[,seq:=toupper(seq)]
-    wfasta(segments_unique[, c("name", "seq")],
-           paste0(opt$output_folder, "/all_segments.fa"))
-    seg_flanks <<- unique(segments_unique[, .(name, lx, rx)], by = "name")
-    fwrite(seg_flanks, paste0(opt$output_folder, "/all_segments_flanks.tsv"), sep = "\t")
-  }
-  segments_unique[,len:=nchar(seq)]
-  return(segments_unique)  
-}  
+# Extracts the polymorphic segments and writes them to all_segments.fa. Returns
+# their flank lengths (name, lx, rx), also written to all_segments_flanks.tsv.
+read_poly <- function(genomes) {
+  segments <- parseONEview(genomes)
+  segments[, seq := toupper(seq)]
+  wfasta(segments[, c("name", "seq")], outf("all_segments.fa"))
+  flanks <- unique(segments[, .(name, lx, rx)], by = "name")
+  fwrite(flanks, outf("all_segments_flanks.tsv"), sep = "\t")
+  flanks
+}
 
 # Stops the run if any parallel task failed: an R error, or a worker that ended
 # without a result (for example killed for using too much memory). Every task
@@ -857,14 +861,14 @@ run_fastga <- function(i, a, b, tempf) {
   }
 }
 
-# Make alignments with FastGA
+# Checks the genome list and makes the FastGA alignments. Returns the genome paths.
 make_alignments <- function(glist) {
   # Check if file exists
   if (!file.exists(glist)) {
     end_pantera(paste0("File not found: ", glist))
   }
   genomes <- readLines(glist)
-  genomes <<- trimws(genomes[nzchar(trimws(genomes))])
+  genomes <- trimws(genomes[nzchar(trimws(genomes))])
   lgenomes <- length(genomes)
   if (lgenomes<2) {
     end_pantera(paste0("At least two genomes needed in ", glist))
@@ -882,7 +886,7 @@ make_alignments <- function(glist) {
   for (i in 1:lgenomes) {
     run_fastga(i, genomes[i], genomes[if (i < lgenomes) i + 1 else 1], tempf)
   }
-  return(lgenomes)
+  return(genomes)
 }
 
 # First pass, finds repeats but does not try to generate any consensus.  
@@ -907,7 +911,7 @@ find_repeats <- function() {
           for (ss in 1:length(segment_sets)) {
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
-              sg_clus <- cdhit2(sg, opt$identity1)
+              sg_clus <- cdhit2(sg, opt$identity1, loop_dir)
               sg_clus[,n:=.N,clus]
               sg_clus <- sg_clus[n>=opt$min_cluster]
               
@@ -917,7 +921,7 @@ find_repeats <- function() {
             }
           }
           if (nrow(candidates) > 0) {
-            wfasta(candidates, paste0("candidates_", start, "_", end, ".fa"))
+            wfasta(candidates, file.path(loop_dir, paste0("candidates_", start, "_", end, ".fa")))
           }
         }
       }
@@ -925,9 +929,11 @@ find_repeats <- function() {
     return(0)
   }
   
+  zones_interval <- loop1_cfg$window
+  zones_interval_overlap <- loop1_cfg$window_overlap
   round <- 1
   lx(paste("Reading data for round:", round))
-  segments_unique <- ffasta("all_segments.fa")
+  segments_unique <- ffasta(outf("all_segments.fa"))
   lx(paste("Total Unique segments:", nrow(segments_unique)))
   segments_unique <- segments_unique[!duplicated(segments_unique)]
   segments_unique[, len := nchar(seq)]
@@ -938,8 +944,8 @@ find_repeats <- function() {
   ins_len <- segments_unique$len - rowSums(seg_flank_lengths(segments_unique$name))
   lx(paste("Largest insertion:", max(ins_len)))
   lx(paste("Smallest insertion:", min(ins_len)))
-  dir.create(paste0("loop_", round), showWarnings = FALSE)
-  setwd(paste0("loop_", round))
+  loop_dir <- outf(paste0("loop_", round))
+  dir.create(loop_dir, showWarnings = FALSE)
   z <-
     seq(
       min(segments_unique$len),
@@ -966,9 +972,8 @@ find_repeats <- function() {
   check_tasks(loop_exit, "Loop 1",
               vapply(rev(zones), function(z) paste0("window ", z[1], "-", z[2]), ""))
   
-  system(paste0("mv ../all_segments.fa ../pantera_lib_", round - 1, ".fa"))
-  system("cat candidates*.fa > ../segments_candidates.fa")
-  setwd("..")
+  file.rename(outf("all_segments.fa"), outf(paste0("pantera_lib_", round - 1, ".fa")))
+  system(paste0("cd ", shQuote(loop_dir), " && cat candidates*.fa > ../segments_candidates.fa"))
 }
 
 find_largest_orfs <- function(dna_sequence) {
@@ -1476,7 +1481,7 @@ gen_counts <- function(names) {
 write_cluster_alignment <- function(alim, cons_name) {
   out <- data.table(name = names(alim), seq = case_flanks(names(alim), alim))
   out[, name := paste0(">", gsub(">", "", name))]
-  wfasta(out, paste0("../alignments/", substr(make.names(cons_name), 1, 36), ".maf"))
+  wfasta(out, outf("alignments", paste0(substr(make.names(cons_name), 1, 36), ".maf")))
 }
 
 # Aligns one cluster from round 2 and builds its consensus. Returns the consensus
@@ -1549,7 +1554,7 @@ cluster_results <- function() {
                         total_s = round(as.numeric(difftime(Sys.time(), t_win, units = "secs")), 2),
                         t_start = round(as.numeric(t_win), 2), t_end = round(as.numeric(Sys.time()), 2),
                         pid = Sys.getpid()),
-             paste0("timing_win_", start, "_", end, ".tsv"), sep = "\t")
+             file.path(loop_dir, paste0("timing_win_", start, "_", end, ".tsv")), sep = "\t")
     }, add = TRUE)
     if (start != end) {
       if (nrow(segments_unique[len >= start][len <= end])> 0) {
@@ -1558,17 +1563,17 @@ cluster_results <- function() {
         n_seg <- nrow(segment_u)
         if (nrow(segment_u) >= opt$min_cluster)  {
           segment_sets <- split(segment_u, 
-                                rep(1:(nrow(segment_u) %/% opt$max_cluster +1), 
+                                rep(1:(nrow(segment_u) %/% max_cluster +1), 
                                     length.out = nrow(segment_u), 
                                     each = ceiling(nrow(segment_u) / 
                                                      (nrow(segment_u) %/%
-                                                        opt$max_cluster +1))))
+                                                        max_cluster +1))))
           
           for (ss in 1:length(segment_sets)) {
             sg <- segment_sets[[ss]]
             if (nrow(sg)>1) {
               t0 <- Sys.time()
-              sg_clus <- cdhit2(sg, opt$identity2)
+              sg_clus <- cdhit2(sg, opt$identity2, loop_dir)
               cdhit_s <- cdhit_s + as.numeric(difftime(Sys.time(), t0, units = "secs"))
               sg_clus[,n:=.N,clus]
               sg_clus <- sg_clus[n>=opt$min_cluster]
@@ -1591,8 +1596,9 @@ cluster_results <- function() {
   
   zones_interval <- loop2_cfg$window
   zones_interval_overlap <- loop2_cfg$window_overlap
-  opt$max_cluster <- loop2_cfg$max_cluster
-  segments_unique <- ffasta("segments_candidates.fa")
+  max_cluster <- loop2_cfg$max_cluster
+  loop_dir <- outf("loop_2")
+  segments_unique <- ffasta(outf("segments_candidates.fa"))
   if (nrow(segments_unique) > 0) {
     lx(paste("Total Unique segments:", nrow(segments_unique)))
     segments_unique <- segments_unique[!duplicated(segments_unique$seq)]
@@ -1604,9 +1610,8 @@ cluster_results <- function() {
     ins_len <- segments_unique$len - rowSums(seg_flank_lengths(segments_unique$name))
     lx(paste("Largest insertion:", max(ins_len)))
     lx(paste("Smallest insertion:", min(ins_len)))
-    dir.create("loop_2", showWarnings = FALSE)
-    dir.create("alignments", showWarnings = FALSE)
-    setwd("loop_2")
+    dir.create(loop_dir, showWarnings = FALSE)
+    dir.create(outf("alignments"), showWarnings = FALSE)
     z <-
       seq(
         min(segments_unique$len),
@@ -1650,22 +1655,21 @@ cluster_results <- function() {
       }))
       if (nrow(cons) > 0) {
         setorder(cons, file, rank)
-        for (f in unique(cons$file)) wfasta(cons[file == f, .(name, seq)], f)
+        for (f in unique(cons$file)) wfasta(cons[file == f, .(name, seq)], file.path(loop_dir, f))
       }
       if (opt$debug) {
-        fwrite(rbindlist(lapply(res, `[[`, "timing")), "../loop2_mafft_timing.tsv", sep = "\t")
+        fwrite(rbindlist(lapply(res, `[[`, "timing")), outf("loop2_mafft_timing.tsv"), sep = "\t")
       }
     }
     # Timing of the clustering step, per window (only with -d)
-    tf <- list.files(pattern = "^timing_win_")
+    tf <- list.files(loop_dir, pattern = "^timing_win_", full.names = TRUE)
     if (opt$debug && length(tf) > 0) {
       tt <- rbindlist(lapply(tf, fread))
       setorder(tt, win_start)
-      fwrite(tt, "../loop2_window_timing.tsv", sep = "\t")
+      fwrite(tt, outf("loop2_window_timing.tsv"), sep = "\t")
       lx(paste("Loop 2 timing written to loop2_window_timing.tsv and loop2_mafft_timing.tsv"))
     }
-    system("cat consen*.fa >> ../all_consensi.fa")
-    setwd("..")
+    system(paste0("cd ", shQuote(loop_dir), " && cat consen*.fa >> ../all_consensi.fa"))
   }
 }
 
@@ -1673,7 +1677,7 @@ cluster_results <- function() {
 
 
 classify_tes <- function() {
-  final <- ffasta("all_consensi.fa")
+  final <- ffasta(outf("all_consensi.fa"))
   final <- final[!duplicated(final$seq)]
   final <- final[order(-nchar(seq))]
   final[, `:=`(
@@ -1685,21 +1689,21 @@ classify_tes <- function() {
     aln_file = paste0(substr(make.names(name), 1, 36), ".maf")
   )]
   final[, name := paste0(">", opt$lib_name, "_", .I)]
-  file <- paste0(opt$lib_name, "-consensi.fa")
+  file <- outf(paste0(opt$lib_name, "-consensi.fa"))
   wfasta(final[, c("name", "seq")], file)
   lx(paste("Final consensi: ", nrow(final)))
   lx("Reading orfs")
   system(
     paste0(
-      "getorf -sequence ",
-      file,
-      " --outseq temp.orfs -minsize 100 >/dev/null 2>&1; blastp -num_threads ", opt$threads, " -query temp.orfs -db ",
-      pantera_home,
-      "/libs/RepeatPeps.lib -outfmt 6 -evalue 1e-1 > orfs.tbl"
+      "getorf -sequence ", shQuote(file),
+      " --outseq ", shQuote(outf("temp.orfs")), " -minsize 100 >/dev/null 2>&1; blastp -num_threads ", opt$threads,
+      " -query ", shQuote(outf("temp.orfs")), " -db ",
+      shQuote(file.path(pantera_home, "libs/RepeatPeps.lib")),
+      " -outfmt 6 -evalue 1e-1 > ", shQuote(outf("orfs.tbl"))
     )
   )
   lx("Reading data")
-  orfs <- fread("orfs.tbl", header = F)
+  orfs <- fread(outf("orfs.tbl"), header = F)
   result <- data.table()
   if (nrow(orfs) > 0) {
     types <-
@@ -1776,15 +1780,14 @@ classify_tes <- function() {
 # Obtain structural stats from TE models and recover or filter some.
 
 
-stats_tes <- function() {
+# final: the classified consensi (from classify_tes); genomes: genome names.
+stats_tes <- function(final, genomes) {
   lx("Stats start")
   tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "gencount", "aln_file",
                    "hom_class", "hom_prob")]
-  file <- paste0(opt$lib_name, "-consensi.fa")
-  
-  temp <- paste0("temp", make.names(gsub(".*/", "", file)))
+  temp <- outf(paste0("temp", make.names(paste0(opt$lib_name, "-consensi.fa"))))
   dir.create(temp)
-  setwd(temp)
+  tmp_tes <- file.path(temp, "tmp-tes")
   lente <- nchar(tes$seq)
   tes$lente <- lente
   orfs_res <- mclapply(tes$seq, three_orfs, mc.cores = opt$threads)
@@ -1803,9 +1806,10 @@ stats_tes <- function() {
   t5 <- rbindlist(lapply(tes$seq, function(s) detect_tail(rc(s))))
   tes[, `:=`(tail3_motif = t3$tail_motif, tail3_len = t3$tail_len,
              tail5_motif = t5$tail_motif, tail5_len = t5$tail_len)]
-  wfasta(tes[, c("name", "seq")], paste0("tmp-tes"))
-  system(paste0("makeblastdb -in tmp-tes -dbtype nucl 1> /dev/null"))
-  te_data <- fread(cmd = paste0("blastn -query tmp-tes -db tmp-tes -task blastn -num_threads ",
+  wfasta(tes[, c("name", "seq")], tmp_tes)
+  system(paste0("makeblastdb -in ", shQuote(tmp_tes), " -dbtype nucl 1> /dev/null"))
+  te_data <- fread(cmd = paste0("blastn -query ", shQuote(tmp_tes), " -db ", shQuote(tmp_tes),
+                                " -task blastn -num_threads ",
                                 opt$threads,
                                 " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"), header = F)
   if (nrow(te_data) > 0) {
@@ -2015,7 +2019,6 @@ stats_tes <- function() {
                Ns = nchar(seq) - nchar(gsub("N", "", seq)))]
     lx("No self-BLAST hits: structural checks skipped")
   }
-  setwd("..")
   unlink(temp, recursive = TRUE)
   tes <- tes[order(-lente)]
   
@@ -2028,21 +2031,21 @@ stats_tes <- function() {
   tes[, name := paste0(short_cls, "_", ix, "-", opt$lib_name, "#", cls)]
   tes[, fragment_of := name[match(fragment_of, work_id)]]   # container id -> final name
   for (k in seq_len(nrow(tes))) {
-    old_aln <- file.path("alignments", tes$aln_file[k])
+    old_aln <- outf("alignments", tes$aln_file[k])
     if (file.exists(old_aln)) {
-      new_aln <- file.path("alignments", paste0(make.names(tes$name[k]), ".maf"))
+      new_aln <- outf("alignments", paste0(make.names(tes$name[k]), ".maf"))
       file.rename(old_aln, new_aln)
       if (isTRUE(tes$flipped[k])) rc_alignment(new_aln)   # match the library orientation
     }
   }
   tes[, name := paste0(">", name)]
   
-  gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, lgenomes)}))
+  gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, genomes)}))
   gmax <- apply(gtab, 1, max)
   tes[gmax < opt$min_copies, pass := F]
   lx(paste("Elements not passing filters:", nrow(tes[pass == FALSE])))
-  wfasta(tes[, c("name", "seq")], paste0(opt$lib_name, "-pantera-final.fa"))
-  wfasta(tes[pass == T, c("name", "seq")], paste0(opt$lib_name, "-pantera-final-pass.fa"))
+  wfasta(tes[, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
+  wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final-pass.fa")))
   stats_data <- tes[, c("name", "lente", "pass", "hom_class", "hom_prob", "cluster", "tsd_l", "tsd_c", "tsd_m",
                         "gencount", "type", "length", "lgap", "rgap", "pa", "tail3_motif", "tail3_len",
                         "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of",
@@ -2060,19 +2063,22 @@ stats_tes <- function() {
   stats_data <- cbind(stats_data, gtab)
   stats_data[,name:=gsub("^>","",name)]
   stats_data$gen_count <- apply(gtab, 1, function(x) {sum(x > 0)})
-  fwrite(stats_data, paste0(opt$lib_name, "-pantera-final.stats.tsv"),
+  fwrite(stats_data, outf(paste0(opt$lib_name, "-pantera-final.stats.tsv")),
          quote = F, row.names = F, sep = "\t")
 }
 
 
 produce_annotation <- function() {
   lx("Obtaining annotations")
-  dir.create("anno")
-  system(paste0("makeblastdb -in pantera_lib_0.fa -out anno/pan -dbtype nucl 1> /dev/null"))
-  te_data <- fread(cmd= paste0("blastn -query ", opt$lib_name,"-pantera-final.fa -db anno/pan -task blastn -num_threads ", 
-                               opt$threads, 
+  lib_fa <- outf(paste0(opt$lib_name, "-pantera-final.fa"))
+  db <- outf("anno", "pan")
+  dir.create(outf("anno"))
+  system(paste0("makeblastdb -in ", shQuote(outf("pantera_lib_0.fa")), " -out ", shQuote(db),
+                " -dbtype nucl 1> /dev/null"))
+  te_data <- fread(cmd= paste0("blastn -query ", shQuote(lib_fa), " -db ", shQuote(db),
+                               " -task blastn -num_threads ", opt$threads,
                                " -evalue 500 -outfmt 6"), header = F)
-  polys <- ffasta(paste0(opt$lib_name,"-pantera-final.fa"))
+  polys <- ffasta(lib_fa)
   polys[,l:=nchar(seq)]
   polys$seq <- NULL
   polys[,name:=gsub(">","",name)]
@@ -2089,27 +2095,23 @@ produce_annotation <- function() {
   annotations[,chr:=gsub(":.*","",gsub(".*#","",V2))]
   annotations[,start:=gsub("-.*","",gsub(".*:","",V2))]
   annotations[,end:=gsub(".*-","",V2)]
-  dir.create("annotations")
-  lapply(unique(annotations$gen), function(x) {fwrite(annotations[gen==x,c("chr","start","end", "names")],paste0("annotations/",x,".bed"), col.names = F, sep ="\t")})
-  unlink("anno", recursive=TRUE)
+  dir.create(outf("annotations"))
+  lapply(unique(annotations$gen), function(x) {fwrite(annotations[gen==x,c("chr","start","end", "names")], outf("annotations", paste0(x, ".bed")), col.names = F, sep ="\t")})
+  unlink(outf("anno"), recursive=TRUE)
 }
 # Delete temporary files
 cleanup <- function() {
   
   lx("Library successfully created.")
-  unlink("alignments/X.CONS*")
-  unlink("loop_1", recursive = TRUE)
-  unlink("loop_2", recursive = TRUE)
-  unlink("orfs.tbl")
-  unlink("pantera_lib_0.fa")
-  unlink("all_segments_flanks.tsv")
-  unlink("segments_candidates.fa")
-  unlink("temp.orfs")
-  unlink("*consensi*")
+  unlink(outf("alignments", "X.CONS*"))
+  unlink(outf("loop_1"), recursive = TRUE)
+  unlink(outf("loop_2"), recursive = TRUE)
+  unlink(outf(c("orfs.tbl", "pantera_lib_0.fa", "all_segments_flanks.tsv",
+                "segments_candidates.fa", "temp.orfs")))
+  unlink(outf("*consensi*"))
   if (opt$keep_alignments == FALSE) {
-    unlink("*.1aln")
+    unlink(outf("*.1aln"))
   }
-  setwd(current)
   lx(paste0(   "\u001b[32;2m",
                "\u263A",
                "\u001b[0m : ","End of process."))
@@ -2120,10 +2122,11 @@ cleanup <- function() {
 ### MAIN 
 ###
 
-# Internal globals 
-zones_interval <- loop1_cfg$window
-zones_interval_overlap <- loop1_cfg$window_overlap
-current <- getwd()
+# Globals, set here only and read by the functions:
+#   opt         options (read_pars)
+#   genomes     genome file names without folders, in the order of the list
+#   seg_flanks  flank lengths of every segment (read_poly), used by seg_flank_lengths
+# All files are written in the output folder (outf); the working directory never changes.
 
 invisible(tryCatch({get_libs()}, error = function(err) {
   end_pantera(paste("Installing libs error ->",geterrmessage()))
@@ -2142,19 +2145,16 @@ RNGkind("L'Ecuyer-CMRG")
 set.seed(opt$seed)
 
 seg_flanks <- data.table(name = character(), lx = numeric(), rx = numeric())
-segments_unique <- data.table(name = as.character(),
-                              seq = as.character())
 
-invisible(tryCatch({lgenomes <- make_alignments(opt$genomes)}, error = function(err) {
+invisible(tryCatch({genome_paths <- make_alignments(opt$genomes)}, error = function(err) {
   end_pantera(paste("Alignments error ->",geterrmessage()))
 }))
 
-genomes <- basename(genomes)
+genomes <- basename(genome_paths)
 
-invisible(tryCatch({segments_unique <- read_poly(lgenomes)}, error = function(err) {
+invisible(tryCatch({seg_flanks <- read_poly(genomes)}, error = function(err) {
   end_pantera(paste("Error reading polymorphisms ->",geterrmessage()))
 }))
-setwd(opt$output_folder)
 
 invisible(tryCatch({find_repeats()}, error = function(err) {
   end_pantera(paste("Error round 1 ->",geterrmessage()))
@@ -2166,7 +2166,7 @@ invisible(tryCatch({cluster_results()}, error = function(err) {
 invisible(tryCatch({final <- classify_tes()}, error = function(err) {
   end_pantera(paste("Error Classification ->",geterrmessage()))
 }))
-invisible(tryCatch({stats_tes()}, error = function(err) {
+invisible(tryCatch({stats_tes(final, genomes)}, error = function(err) {
   end_pantera(paste("Error Stats ->",geterrmessage()))
 }))
 invisible(tryCatch({produce_annotation()}, error = function(err) {
@@ -2177,7 +2177,6 @@ if (opt$debug == FALSE) {
     end_pantera(paste("Error cleaning up ->",geterrmessage()))
   }))
 } else {
-  setwd(current)
   lx(paste0(   "\u001b[32;2m",
                "\u263A",
                "\u001b[0m : ","End of process."))
