@@ -556,6 +556,35 @@ sw_anchored <- function(a, b, max_start = 10, match = 2, mismatch = -3, gap = 5)
        end_a = bi, end_b = bj)
 }
 
+# Scores of anchored local alignments (as sw_anchored) of every row of A (a matrix of
+# single characters, one sequence per row) against b. Only the scores: all rows are
+# aligned at once, one alignment row at a time. With a linear gap penalty, the left
+# gaps in a row are max over k <= j of (D[k] - gap * (j - k)), computed in log2(m)
+# doubling steps.
+sw_anchored_scores <- function(A, b, max_start = 10, match = 2, mismatch = -3, gap = 5) {
+  b <- strsplit(b, "")[[1]]
+  r <- nrow(A); n <- ncol(A); m <- length(b)
+  start_cols <- (0:m) <= max_start
+  H <- matrix(ifelse(start_cols, 0, -Inf), r, m + 1, byrow = TRUE)
+  M <- matrix(0, r, m)                                   # best score so far per cell
+  shifts <- 2^(0:max(0, ceiling(log2(m + 1)) - 1))
+  for (i in seq_len(n)) {
+    hit <- outer(A[, i], b, "==") & A[, i] != "N"
+    s <- mismatch + (match - mismatch) * hit
+    D <- H - gap                                         # up
+    D[, -1] <- pmax(D[, -1], H[, -(m + 1)] + s)          # diagonal
+    if (i <= max_start) D[, start_cols] <- pmax(D[, start_cols], 0)   # new starts
+    D[, 1] <- if (i <= max_start) 0 else -Inf            # column 0
+    for (sh in shifts) {                                 # left gaps
+      if (sh > m) break
+      D[, (sh + 1):(m + 1)] <- pmax(D[, (sh + 1):(m + 1)], D[, 1:(m + 1 - sh)] - gap * sh)
+    }
+    H <- D
+    M <- pmax(M, H[, -1, drop = FALSE])
+  }
+  apply(M, 1, max)
+}
+
 # Integer seed for an element's random draws, from its sequence and --seed: the same
 # sequence and seed always give the same draws, whatever other elements there are.
 seq_seed <- function(s) {
@@ -585,8 +614,11 @@ find_terminal_tir <- function(s, win = 50, max_gap = 10, n_null = 100, min_len =
   on.exit(if (is.null(old_seed)) rm(".Random.seed", envir = globalenv())
           else assign(".Random.seed", old_seed, envir = globalenv()))
   set.seed(seq_seed(s))
-  null <- replicate(n_null, sw_anchored(paste(sample(lchars), collapse = ""), right,
-                                        max_start = max_gap)$score)
+  # The shuffles are drawn in the same order as when they were aligned one by one,
+  # and only their scores are needed, so they are all aligned at once
+  shuffled <- matrix(unlist(lapply(seq_len(n_null), function(k) sample(lchars))),
+                     nrow = n_null, byrow = TRUE)
+  null <- sw_anchored_scores(shuffled, right, max_start = max_gap)
   data.table(tir_len = len, tir_lgap = hit$start_a - 1, tir_rgap = hit$start_b - 1,
              tir_p = (sum(null >= hit$score) + 1) / (n_null + 1))
 }
@@ -1946,7 +1978,7 @@ stats_tes <- function(final, genomes) {
     ### Putting all together
     # Remove the dups detected
     tes <- tes[!(name %in% dups_list)]
-    lx(paste("Removed dups:", length(dups_list)))
+    lx(paste("Removed dups:", length(unique(dups_list))))
     tes[, pass := F]
     tes[, sf := gsub(".*#", "", name), by = .I]
     

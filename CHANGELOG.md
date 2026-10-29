@@ -6,12 +6,14 @@
 - No more R warnings "'/etc/localtime' is not a symlink" / "is not identical to any known timezone file" when running in a container: if `TZ` is unset and `/etc/localtime` is a regular file, panteraGA uses it directly (`TZ=:/etc/localtime`), keeping the host's local time.
 - Loop 2 no longer stops the run when a cluster's alignment has no conserved block, or when a cluster holds a single sequence (possible only with `-m 1`): the cluster gives no consensus. Both cases used an R `next` outside a loop and would have stopped the run with an error; neither happened in the test runs.
 - A file named `all_segments.fa` in the directory the run was started from (not the output folder) made the run stop with an error.
+- The log overcounted removed duplicates ("Removed dups"): an element duplicated in several pairs was counted once per pair. Only the logged number was wrong.
 - Log typos: "Processing N alignments" (was "Procesing"), "successfully". `scripts/compare_runs.sh` accepts both spellings.
 
 ### Changed
 - Internal thresholds that are not command-line options (loop 1 and 2 windows, consensus, edge and TSD search, classification probability, structure rules) are grouped in named settings near the top of the script, each with a short description. Results are unchanged.
 - Loop 2's per-cluster work (`process_cluster_2`, about 450 lines) is split into separate functions: alignment, column consensus, raw edges, the TSD caller, the edge search, the TSD offset refinement and writing the alignment. Results are unchanged.
 - panteraGA no longer changes the working directory (`setwd`): every file is written with its full path in the output folder, and file paths passed to external tools are quoted. Functions no longer assign global variables (`<<-`): the genome names and the segment flank lengths are set once in the main part of the script. Results are unchanged.
+- The terminal TIR test is about 8 times faster: the 100 shuffled copies it compares each element with are aligned all at once, and only their scores are computed. Results are unchanged (same shuffles, same scores, same p-values).
 
 ### Removed
 - Unused function `cdhit1` and commented-out code.
