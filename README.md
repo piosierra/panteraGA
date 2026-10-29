@@ -52,8 +52,8 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-T, --threads` | 8 (or the number of cores, if fewer) | Threads |
 | `-s, --min_size` | 50 | Min length of a polymorphic insertion, without flanks |
 | `-l, --max_size` | 30000 | Max length of a polymorphic insertion, without flanks |
-| `-i, --identity1` | 0.90 | Identity for clustering, first round |
-| `-y, --identity2` | 0.85 | Identity for clustering, second round |
+| `-i, --identity1` | 0.90 | Identity for clustering, first round (0.8 to 1) |
+| `-y, --identity2` | 0.85 | Identity for clustering, second round (0.8 to 1) |
 | `-m, --min_cluster` | 3 | Min sequences to build a consensus |
 | `-u, --max_cluster` | 300 | Max sequences per cluster, first round (the second round uses 1000) |
 | `-e, --min_copies` | 2 | Min copies in at least one genome for an element to pass |

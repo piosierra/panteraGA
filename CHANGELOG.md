@@ -6,6 +6,7 @@
 - Stats file: column `TSD_pvalue`, after `TSD_motif`: the p-value of the reported TSD (agreement between copies beyond chance, corrected for the TSD lengths tried). Empty when no TSD is reported. The consensus names in intermediate files carry it as `_tsdp`.
 
 ### Fixed
+- `-i/--identity1` and `-y/--identity2` must be between 0.8 and 1. cd-hit-est refuses lower identities with the word length panteraGA uses, and the run stopped later with a misleading error ("cannot open the connection"). Values outside the range now stop the run at the start, with a message naming the option.
 - A TSD length found in a single copy no longer counts as a TSD. A long chance match in one copy (e.g. 11 bp in 1 of 5 copies) passed the significance test, and its length was reported with confidence 0 and no motif. The minimum number of copies sharing a TSD length is now 2 (`tsd_cfg$min_support`, also used for the motif). In the test data, two SINEs lose such 10-11 bp "TSDs"; nothing else changes.
 
 ## [1.4.1]

@@ -180,8 +180,8 @@ read_pars <- function() {
       "threads",        "T", 1, "integer",   "Threads [8, or the number of cores if fewer]",
       "min_size",       "s", 1, "integer",   "Min length of a polymorphic insertion, without flanks [50]",
       "max_size",       "l", 1, "integer",   "Max length of a polymorphic insertion, without flanks [30000]",
-      "identity1",      "i", 1, "double",    "Identity for clustering, first round [0.90]",
-      "identity2",      "y", 1, "double",    "Identity for clustering, second round [0.85]",
+      "identity1",      "i", 1, "double",    "Identity for clustering, first round, 0.8-1 [0.90]",
+      "identity2",      "y", 1, "double",    "Identity for clustering, second round, 0.8-1 [0.85]",
       "min_cluster",    "m", 1, "integer",   "Min sequences to build a consensus [3]",
       "max_cluster",    "u", 1, "integer",   "Max sequences per cluster, first round [300]",
       "min_copies",     "e", 1, "integer",   "Min copies in at least one genome for an element to pass [2]",
@@ -253,6 +253,14 @@ read_pars <- function() {
 
   if (is.null(opt$identity2)) {
     opt$identity2 <- 0.85
+  }
+
+  # cd-hit-est, with the word length used here (-n 8), refuses identities below 0.8
+  for (o in c("identity1", "identity2")) {
+    if (opt[[o]] < 0.8 || opt[[o]] > 1) {
+      flag <- if (o == "identity1") "i" else "y"
+      stop("[--", o, "|-", flag, "] must be between 0.8 and 1 (cd-hit-est's limit), not ", opt[[o]])
+    }
   }
 
   if (is.null(opt$min_cluster)) {
