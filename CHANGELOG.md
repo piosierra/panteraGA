@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.1]
+
+Libraries, stats, alignments and annotations are identical to 1.4.0, and runs are faster: in a two-genome test (Eledone cirrhosa, 8 threads), processing after the FastGA alignments took about 30% less time. Two rare cases that stopped the run with an error now complete (see Fixed). The code is reorganised internally.
 
 ### Fixed
 - No more R warnings "'/etc/localtime' is not a symlink" / "is not identical to any known timezone file" when running in a container: if `TZ` is unset and `/etc/localtime` is a regular file, panteraGA uses it directly (`TZ=:/etc/localtime`), keeping the host's local time.

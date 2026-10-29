@@ -4,7 +4,7 @@
 # segments found in FastGA whole genome alignments between two or more genomes.
 # https://github.com/piosierra/panteraGA  (MIT licence)
 
-pantera_version <- "1.4.0"
+pantera_version <- "1.4.1"
 options(warn = 0)
 
 # In containers (Apptainer/Singularity), /etc/localtime is often a copy of the
