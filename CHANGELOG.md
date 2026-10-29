@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Stats file: column `TSD_pvalue`, after `TSD_motif`: the p-value of the reported TSD (agreement between copies beyond chance, corrected for the TSD lengths tried). Empty when no TSD is reported. The consensus names in intermediate files carry it as `_tsdp`.
+
+### Fixed
+- A TSD length found in a single copy no longer counts as a TSD. A long chance match in one copy (e.g. 11 bp in 1 of 5 copies) passed the significance test, and its length was reported with confidence 0 and no motif. The minimum number of copies sharing a TSD length is now 2 (`tsd_cfg$min_support`, also used for the motif). In the test data, two SINEs lose such 10-11 bp "TSDs"; nothing else changes.
+
 ## [1.4.1]
 
 Libraries, stats, alignments and annotations are identical to 1.4.0, and runs are faster: in a two-genome test (Eledone cirrhosa, 8 threads), processing after the FastGA alignments took about 30% less time. Two rare cases that stopped the run with an error now complete (see Fixed). The code is reorganised internally.

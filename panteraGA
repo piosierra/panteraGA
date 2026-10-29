@@ -87,7 +87,7 @@ tsd_cfg <- list(
                           #   (FALSE: 0.25 per base)
   sig_threshold = 0.1,    # max p-value for a copy's own TSD call to count
   alpha = 0.05,           # significance of the agreement between copies (corrected)
-  motif_min_support = 2,  # min copies supporting a TSD to report its motif
+  min_support = 2L,       # min copies sharing a TSD length for it to count (and to give a motif)
   max_shift = 12,         # edges are moved up to this many columns each way
   min_core = 20,          # never shrink the element below this many columns
   adequate_support = 0.65,# min fraction of copies agreeing on a TSD before moving an edge
@@ -1339,7 +1339,7 @@ summarize_tsd <- function(calls, sig_threshold = tsd_cfg$sig_threshold) {
 }
 
 # IUPAC consensus of the TSD copies supporting the modal length
-tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = tsd_cfg$motif_min_support) {
+tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = tsd_cfg$min_support) {
   K <- tsd_K()
   k <- summ$modal_len
   if (is.na(k) || length(summ$rows) < min_support) return("")
@@ -1357,9 +1357,12 @@ tsd_motif <- function(summ, Lt, Rh, offl = 0L, offr = 0L, min_support = tsd_cfg$
 ## it by the number of lengths tried and, in the shift search, by the number of edge
 ## positions tried. Without that, a 3-copy cluster finds a chance 2 bp "TSD" (2 of 3
 ## copies) somewhere in the ~600 candidates almost every time.
+## A length found in a single copy is not a duplication shared by the family: one
+## long chance match (e.g. 12 bp, q ~ 1e-6) would otherwise pass easily. Lengths
+## shared by fewer than tsd_cfg$min_support copies get p = 1.
 tsd_pvalue <- function(summ, p0, n, min_identity = tsd_cfg$min_identity) {
   L <- summ$modal_len
-  if (is.na(L)) return(1)
+  if (is.na(L) || length(summ$rows) < tsd_cfg$min_support) return(1)
   q <- stats::pbinom(ceiling(min_identity * L - 1e-9) - 1, L, p0, lower.tail = FALSE)
   stats::pbinom(length(summ$rows) - 1, n, q, lower.tail = FALSE)
 }
@@ -1505,8 +1508,9 @@ refine_tsd_offset <- function(best, Lt, Rh, p0_final) {
 }
 
 # Element edges and TSD for an aligned cluster. Returns the edges (alignment columns)
-# and the TSD length, confidence and motif; with no significant TSD, length 0,
-# confidence 0 and no motif (not NA, so the consensus name and the rules downstream work).
+# and the TSD length, confidence, motif and p-value (corrected for the lengths tried);
+# with no significant TSD, length 0, confidence 0, no motif (not NA, so the consensus
+# name and the rules downstream work) and p-value NA.
 find_edges_tsd <- function(alim, cMatrix, cons_s_raw, cons_e_raw, ncols) {
   nseqs <- length(alim)
   fl <- tsd_flank_bases(alim)
@@ -1519,15 +1523,17 @@ find_edges_tsd <- function(alim, cMatrix, cons_s_raw, cons_e_raw, ncols) {
   ## Report a TSD only if the agreement at the final edges is more than chance (one
   ## edge position, so corrected only for the number of lengths tried). Otherwise it
   ## would still feed the TSD-based reclassification rules.
-  if (tsd_pvalue(summ, tsd$p0, nseqs) * (tsd_cfg$max_len - 1L) > tsd_cfg$alpha) {
+  pval <- min(1, tsd_pvalue(summ, tsd$p0, nseqs) * (tsd_cfg$max_len - 1L))
+  if (pval > tsd_cfg$alpha) {
     summ <- list(modal_len = NA_integer_, modal_conf = 0, rows = integer(0))
   }
   motif <- tsd_motif(summ, Lt, Rh, tsd$offl, tsd$offr)
   if (is.na(summ$modal_len)) {
-    return(list(cons_s = best$cons_s, cons_e = best$cons_e, len = 0, conf = 0, motif = ""))
+    return(list(cons_s = best$cons_s, cons_e = best$cons_e, len = 0, conf = 0, motif = "",
+                pval = NA_real_))
   }
   list(cons_s = best$cons_s, cons_e = best$cons_e,
-       len = summ$modal_len, conf = summ$modal_conf, motif = motif)
+       len = summ$modal_len, conf = summ$modal_conf, motif = motif, pval = signif(pval, 3))
 }
 
 # Copies per genome of a cluster, as "#genome1---n1---genome2---n2#"
@@ -1583,7 +1589,7 @@ process_cluster_2 <- function(job) {
   cons <- gsub("-", "", cons)
   nam <- paste0(">CONS-", job$start, "-", job$end, "-", job$u, "-",
                 nchar(cons), "_clus", length(clust_temp), "_tsdl", et$len, "_tsdc", et$conf,
-                "_tsdm", et$motif, "_gens", gen_counts(seqs_clust$name), "@@")
+                "_tsdm", et$motif, "_tsdp", et$pval, "_gens", gen_counts(seqs_clust$name), "@@")
   # Clusters that reach the flanks are most likely segmental duplications
   if (nchar(cons) >= max(loop2_cfg$min_cons_len, opt$min_size) &&
       trimmed > loop2_cfg$min_trimmed) {
@@ -1743,7 +1749,8 @@ classify_tes <- function() {
     cluster  = as.numeric(gsub("_tsdl.*", "", gsub(".*_clus", "", name))),
     tsd_l    = as.numeric(gsub("_tsdc.*", "", gsub(".*_tsdl", "", name))),
     tsd_c    = as.numeric(gsub("_tsdm.*", "", gsub(".*_tsdc", "", name))),
-    tsd_m    = gsub("_gens.*", "", gsub(".*_tsdm", "", name)),
+    tsd_m    = gsub("_tsdp.*", "", gsub(".*_tsdm", "", name)),
+    tsd_p    = suppressWarnings(as.numeric(gsub("_gens.*", "", gsub(".*_tsdp", "", name)))),
     gencount = gsub("@@.*", "", gsub(".*_gens", "", name)),
     aln_file = paste0(substr(make.names(name), 1, 36), ".maf")
   )]
@@ -1833,7 +1840,7 @@ classify_tes <- function() {
   # Working name: unique id + class. Final names are set at the end of stats_tes().
   final[, name := paste0(name, "#", Prediction)]
   fwrite(final, paste0(file, ".statspre"), sep = "\t")
-  return(final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "gencount", "aln_file",
+  return(final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "gencount", "aln_file",
                    "hom_class", "hom_prob")])
 }
 
@@ -1844,7 +1851,7 @@ classify_tes <- function() {
 # final: the classified consensi (from classify_tes); genomes: genome names.
 stats_tes <- function(final, genomes) {
   lx("Stats start")
-  tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "gencount", "aln_file",
+  tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "gencount", "aln_file",
                    "hom_class", "hom_prob")]
   temp <- outf(paste0("temp", make.names(paste0(opt$lib_name, "-consensi.fa"))))
   dir.create(temp)
@@ -2108,7 +2115,7 @@ stats_tes <- function(final, genomes) {
   wfasta(tes[, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
   wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final-pass.fa")))
   stats_data <- tes[, c("name", "lente", "pass", "hom_class", "hom_prob", "cluster", "tsd_l", "tsd_c", "tsd_m",
-                        "gencount", "type", "length", "lgap", "rgap", "pa", "tail3_motif", "tail3_len",
+                        "tsd_p", "gencount", "type", "length", "lgap", "rgap", "pa", "tail3_motif", "tail3_len",
                         "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of",
                         "orf1", "orf2", "orf3", "maxRep", "Ns")]
   ### Last fixes
@@ -2116,7 +2123,7 @@ stats_tes <- function(final, genomes) {
   stats_data$pa <- stats_data$pa < opt$min_polya
   
   colnames(stats_data) <- c("name", "TE_len", "pass", "homology_class", "homology_prob", "cluster_size",
-                            "TSD_length", "TSD_confidence", "TSD_motif",
+                            "TSD_length", "TSD_confidence", "TSD_motif", "TSD_pvalue",
                             "gen_count", "struct_type", "struct_len", "left_gap",
                             "right_gap", "polyA", "tail3_motif", "tail3_len", "tail5_motif", "tail5_len",
                             "tr3_relatives", "fragment_of", "orf1", "orf2", "orf3", "maxTR", "Ns")
