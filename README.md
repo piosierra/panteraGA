@@ -15,7 +15,7 @@ conda create -n pantera -c conda-forge -c bioconda panteraga
 conda activate pantera
 ```
 
-This installs panteraGA with all its dependencies (FastGA, alntools, BLAST, MAFFT, CD-HIT, EMBOSS and the R packages) and the classification model.
+This installs panteraGA with all its dependencies (FastGA, FasTAN, alntools, BLAST, MAFFT, CD-HIT, EMBOSS and the R packages) and the classification model.
 
 ### Containers
 
@@ -66,6 +66,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-z, --anno_identity` | 0.80 | Min identity of a hit, and min length ratio hit/element, for genome annotation |
 | `-I, --align_iterations` | 1000 | Max mafft refinement iterations (L-INS-i) for clusters of fewer than 100 sequences shorter than 3 kb; 1000 is what mafft `--auto` uses. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi: in that test about 20% differed slightly and a few short elements were gained or lost |
 | `-r, --seed` | 1 | Random seed for the TIR test. The same data and seed give identical results, whatever `-T` |
+| `-t, --tandem_mask` | | Soft mask the tandem arrays of each genome, found with [FasTAN](https://github.com/thegenemyers/FASTAN), before aligning (`FastGA -M`). Much faster with genomes rich in satellites, with almost the same segments (see [Tandem masking](#tandem-masking)). The genome databases and masks are written to `tandem/` in the output folder, and kept with `-k` or `-d` |
 | `-k, --keep_alignments` | | Keep the FastGA alignments, named after the two genomes (`<genome1>_<genome2>.1aln`). A run reuses the alignments it finds in its output folder, including ones named `pantera<n>.1aln` by earlier versions |
 | `-d, --debug` | | Keep intermediate files, and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
@@ -85,7 +86,15 @@ In the output folder:
 | `annotations/` | A BED file per genome with the copies of each accepted element |
 | `pantera.log` | Log of the run |
 
+With `-t`, `tandem/` holds the genome databases (`.1gdb`) and the tandem arrays found by FasTAN (`<genome>_tan.1ano`), when kept with `-k` or `-d`. The alignments refer to the databases, so keep them together.
+
 Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within each class (accepted and rejected elements share the numbering).
+
+## Tandem masking
+
+Long tandem arrays (satellites, centromeres) make FastGA extend huge alignments through them, and can dominate the alignment time. With `-t`, FasTAN finds the tandem arrays of each genome and they are soft masked in the genome index, so FastGA starts no alignment inside them (alignments can still extend through them). Coordinates and sequences are unchanged: segments, alignments and annotations refer to the original genomes.
+
+In a test with the two haplotypes of gorilla chromosome 22 (T2T, 59 Mb, 36% in tandem arrays, 2 threads), FastGA took 632 s without masking and 22 s with it, after about 25 s per genome for FasTAN and the masked index. svfind found 201 segments without masking and 177 with it: 176 of them are the same (173 with the same breakpoints and length), and the 25 lost were all at tandem arrays (median 6.4 kb, likely array length differences). In a 25 Mb genome with 6% in tandem arrays, masking made no difference in time.
 
 ## Citation
 

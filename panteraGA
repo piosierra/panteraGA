@@ -192,6 +192,7 @@ read_pars <- function() {
       "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
       "align_iterations","I", 1, "integer",  "Max mafft refinement iterations for clusters of < 100 sequences < 3 kb; 2 is faster, changes some consensi [1000]",
       "seed",           "r", 1, "integer",   "Random seed for the TIR test; the same data and seed give the same results [1]",
+      "tandem_mask",    "t", 0, "logical",   "Soft mask the tandem arrays found by FasTAN before aligning (FastGA -M); faster with satellite-rich genomes",
       "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
       "debug",          "d", 0, "logical",   "Keep intermediate files",
       "verbose",        "v", 0, "logical",   "Show log messages on screen",
@@ -314,6 +315,10 @@ read_pars <- function() {
 
   if (is.null(opt$seed)) {
     opt$seed <- 1
+  }
+
+  if (is.null(opt$tandem_mask)) {
+    opt$tandem_mask <- FALSE
   }
 
   if (is.null(opt$keep_alignments)) {
@@ -816,7 +821,14 @@ init_pantera <- function() {
   if (!(nchar(Sys.which("ONEview")) > 0)) {
     end_pantera("ONEview not found")
   }
-  
+  if (opt$tandem_mask) {
+    for (tool in c("FasTAN", "FAtoGDB", "GIXmake")) {
+      if (!(nchar(Sys.which(tool)) > 0)) {
+        end_pantera(paste(tool, "not found, needed by [--tandem_mask|-t]"))
+      }
+    }
+  }
+
   for (f in c("model/typesnames", "model/featurenames", "model/xgbmodel.ubj",
               "libs/RepeatPeps.lib", "libs/RepeatPeps.lib.psq")) {
     if (!file.exists(file.path(pantera_home, f))) {
@@ -847,6 +859,7 @@ init_pantera <- function() {
   lx(paste("Minimum size of flanking sequences:",
              if (opt$flank_auto) "automatic" else opt$flanking))
   lx(paste("Flank quantile discarded:", opt$flank_quantile))
+  lx(paste("Mask tandem arrays before aligning:", opt$tandem_mask))
   lx(paste("Keep alignments:", opt$keep_alignments))
   lx(paste("Debug (keep intermediates):", opt$debug))
   lx(paste("Random seed:", opt$seed))
@@ -898,9 +911,85 @@ aln_path <- function(genomes, i) {
   outf(paste0(genome_stem(genomes[i]), "_", genome_stem(genomes[j]), ".1aln"))
 }
 
-# Runs FastGA on two genomes and stops the run if no alignment was produced
-run_fastga <- function(i, a, b, aln, tempf) {
-  lx(paste0("Aligning ", gsub(".*/", "", a), " <-> ", gsub(".*/", "", b)))
+# With -t, the genome databases (GDB), their tandem masks and indexes (GIX) are
+# kept in this folder of the output folder: <genome>.1gdb (and the hidden
+# .<genome>.bps holding the sequence), <genome>_tan.1ano (FasTAN's tandem arrays)
+# and, while aligning, <genome>.gix. The .1aln files refer to the GDBs, so these
+# stay until the segments are read (and with -k, as long as the alignments).
+tandem_dir <- function() outf("tandem")
+
+tandem_gdb <- function(g) file.path(tandem_dir(), paste0(genome_stem(g), ".1gdb"))
+
+# Makes the GDB of genome g in the tandem folder, if not there yet. Returns its path.
+make_gdb <- function(g) {
+  gdb <- tandem_gdb(g)
+  if (!file.exists(gdb)) {
+    dir.create(tandem_dir(), showWarnings = FALSE)
+    status <- system(paste("FAtoGDB", shQuote(g), shQuote(gdb)))
+    if (status != 0 || !file.exists(gdb)) {
+      end_pantera(paste0("FAtoGDB failed on ", g, " (exit status ", status, ")"))
+    }
+  }
+  gdb
+}
+
+# Finds the tandem arrays of genome g with FasTAN and builds its index (GIX) with
+# them soft masked, so that FastGA -M seeds no alignment inside them.
+mask_genome <- function(g, tempf) {
+  gdb <- make_gdb(g)
+  root <- sub("\\.1gdb$", "_tan", gdb)
+  ano <- paste0(root, ".1ano")
+  if (!file.exists(ano)) {
+    t0 <- Sys.time()
+    status <- system(paste0("FasTAN -m -T", opt$threads, " -o", shQuote(root), " ", shQuote(gdb)))
+    if (status != 0 || !file.exists(ano)) {
+      unlink(ano)
+      end_pantera(paste0("FasTAN failed on ", g, " (exit status ", status, ")"))
+    }
+    lx(paste0("  Tandem arrays of ", basename(g), ": ", tandem_summary(ano), ", ",
+              round(as.numeric(difftime(Sys.time(), t0, units = "secs"))), " s"))
+  }
+  # Always rebuilt: the mask of an index can only be set when it is made
+  dir.create(tempf, showWarnings = FALSE)
+  status <- system(paste0("GIXmake -T", opt$threads, " -P", shQuote(tempf), " ",
+                          shQuote(gdb), " ", shQuote(paste0("#", ano))))
+  unlink(tempf, recursive = TRUE)
+  if (status != 0 || !file.exists(sub("\\.1gdb$", ".gix", gdb))) {
+    end_pantera(paste0("GIXmake failed indexing ", g, " with its tandem mask (exit status ", status, ")"))
+  }
+  gdb
+}
+
+# Number and total length of the tandem arrays in a FasTAN .1ano ("" if ANOtoBED,
+# from FastGA, is not available)
+tandem_summary <- function(ano) {
+  if (!(nchar(Sys.which("ANOtoBED")) > 0)) {
+    return("found")
+  }
+  # ANOtoBED starts with provenance lines (#); then name, start, end, ...
+  b <- tryCatch(fread(cmd = paste("ANOtoBED", shQuote(ano), "| grep -v '^#'"),
+                      header = FALSE, sep = "\t", select = 1:3),
+                error = function(e) NULL)
+  if (is.null(b) || nrow(b) == 0) {
+    return("none found")
+  }
+  paste0(format(nrow(b), big.mark = ","), " arrays, ",
+         format(round(sum(as.numeric(b$V3) - as.numeric(b$V2)) / 1e6, 2), nsmall = 2), " Mb")
+}
+
+# Removes the index (GIX) of a GDB, made only for aligning: as large as the genome
+drop_gix <- function(gdb) {
+  base <- sub("\\.1gdb$", "", gdb)
+  unlink(c(paste0(base, ".gix"),
+           Sys.glob(file.path(dirname(base), paste0(".", basename(base), ".ktab.*")))))
+}
+
+# Runs FastGA on two genomes and stops the run if no alignment was produced.
+# masked: a and b are GDBs indexed with their tandem mask (FastGA -M); names are
+# the genomes they come from, for the log
+run_fastga <- function(i, a, b, aln, tempf, masked = FALSE, names = c(a, b)) {
+  lx(paste0("Aligning ", basename(names[1]), " <-> ", basename(names[2]),
+            if (masked) " (tandem arrays masked)" else ""))
   # Alignments from runs before 1.4.1 were named pantera<i>.1aln: reuse them
   old <- outf(paste0("pantera", i, ".1aln"))
   if (!file.exists(aln) && file.exists(old)) {
@@ -909,7 +998,8 @@ run_fastga <- function(i, a, b, aln, tempf) {
   }
   if (!file.exists(aln)) {
     dir.create(tempf, showWarnings = FALSE)
-    status <- system(paste0("FastGA -1:", aln, " -P", tempf, " ", a, " ", b))
+    status <- system(paste0("FastGA ", if (masked) "-M " else "", "-1:", aln, " -P", tempf,
+                            " ", shQuote(a), " ", shQuote(b)))
     unlink(tempf, recursive = TRUE)
     if (status != 0 || !file.exists(aln) || file.size(aln) == 0) {
       unlink(aln)
@@ -947,9 +1037,34 @@ make_alignments <- function(glist) {
                        paste(same, collapse = ", ")))
   }
   tempf <- paste0(opt$output_folder,"/tmp",stri_rand_strings(1, 12, '[A-Z]'))
+  nxt <- function(i) if (i < lgenomes) i + 1 else 1
+  sources <- genomes
+  if (opt$tandem_mask) {
+    # Alignment i (genome i vs the next) still to be made, not found from an earlier run
+    todo <- vapply(1:lgenomes, function(i) {
+      !file.exists(aln_path(genomes, i)) && !file.exists(outf(paste0("pantera", i, ".1aln")))
+    }, TRUE)
+    t_all <- Sys.time()
+    for (k in 1:lgenomes) {
+      # Genome k is in alignments k and k - 1 of the ring
+      if (todo[k] || todo[if (k > 1) k - 1 else lgenomes]) {
+        sources[k] <- mask_genome(genomes[k], tempf)
+      } else {
+        sources[k] <- make_gdb(genomes[k])
+      }
+    }
+    if (any(todo)) {
+      lx(paste0("Tandem masking took ",
+                round(as.numeric(difftime(Sys.time(), t_all, units = "secs"))), " s"))
+    }
+  }
   # Ring of pairwise alignments: 1 vs 2, 2 vs 3, ..., last vs 1
   for (i in 1:lgenomes) {
-    run_fastga(i, genomes[i], genomes[if (i < lgenomes) i + 1 else 1], aln_path(genomes, i), tempf)
+    run_fastga(i, sources[i], sources[nxt(i)], aln_path(genomes, i), tempf,
+               masked = opt$tandem_mask, names = genomes[c(i, nxt(i))])
+  }
+  if (opt$tandem_mask) {
+    for (gdb in sources) drop_gix(gdb)
   }
   return(genomes)
 }
@@ -2206,6 +2321,10 @@ cleanup <- function() {
   unlink(outf("*consensi*"))
   if (opt$keep_alignments == FALSE) {
     unlink(outf("*.1aln"))
+    # The GDBs of -t are read through the alignments: kept with them, or with -d
+    if (!opt$debug) {
+      unlink(tandem_dir(), recursive = TRUE)
+    }
   }
   lx(paste0(   "\u001b[32;2m",
                "\u263A",

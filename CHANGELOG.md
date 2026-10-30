@@ -7,6 +7,7 @@
 - `scripts/compare_runs.sh` compares the accepted libraries, for runs of this and earlier versions.
 
 ### Added
+- `-t/--tandem_mask`: the tandem arrays of each genome, found with FasTAN, are soft masked before aligning (FastGA `-M`), so FastGA starts no alignment in satellites and centromeres. With the two haplotypes of gorilla chromosome 22 (T2T), the alignment took 22 s instead of 632 s, and svfind gave almost the same segments (176 of 177 also found without masking; 25 of 201 lost, all at tandem arrays). Coordinates and sequences are those of the original genomes. The genome databases (`.1gdb`) and masks (`.1ano`) are written to `tandem/` in the output folder, and kept with `-k` (the alignments refer to them) or `-d`. Needs FasTAN (new dependency, bioconda `fastan`); FAtoGDB and GIXmake come with FastGA.
 - Stats file: column `reason`, after `pass`: the rule that accepted or rejected the element (the last rule that decided, since rules run in order and later ones overwrite earlier ones).
 - Stats file: column `TSD_pvalue`, after `TSD_motif`: the p-value of the reported TSD (agreement between copies beyond chance, corrected for the TSD lengths tried). Empty when no TSD is reported. The consensus names in intermediate files carry it as `_tsdp`.
 
