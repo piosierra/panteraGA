@@ -937,14 +937,16 @@ make_gdb <- function(g) {
 # them soft masked, so that FastGA -M seeds no alignment inside them.
 mask_genome <- function(g, tempf) {
   gdb <- make_gdb(g)
-  root <- sub("\\.1gdb$", "_tan", gdb)
-  ano <- paste0(root, ".1ano")
+  ano <- sub("\\.1gdb$", "_tan.1ano", gdb)
   if (!file.exists(ano)) {
     t0 <- Sys.time()
-    status <- system(paste0("FasTAN -m -T", opt$threads, " -o", shQuote(root), " ", shQuote(gdb)))
+    # -o with the .1ano extension: given a root, FasTAN drops everything after its
+    # last dot (a.hap1_tan would give a.1ano)
+    status <- system(paste0("FasTAN -m -T", opt$threads, " -o", shQuote(ano), " ", shQuote(gdb)))
     if (status != 0 || !file.exists(ano)) {
       unlink(ano)
-      end_pantera(paste0("FasTAN failed on ", g, " (exit status ", status, ")"))
+      end_pantera(paste0("FasTAN failed on ", g, " (exit status ", status, "): ",
+                         basename(ano), " not written"))
     }
     lx(paste0("  Tandem arrays of ", basename(g), ": ", tandem_summary(ano), ", ",
               round(as.numeric(difftime(Sys.time(), t0, units = "secs"))), " s"))
