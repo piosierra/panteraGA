@@ -49,6 +49,10 @@ pantera_home <- Sys.getenv("PANTERA_HOME",
 # flank length assumed for segments whose exact flanks are unknown.
 svfind_flank <- 100
 
+# Attempts for each run of FastGA, GIXmake and FasTAN: FastGA's index step
+# (GIXmake) sometimes crashes (segmentation fault) and works when run again
+tool_attempts <- 3
+
 # Loop 1: length windows for the first clustering round
 loop1_cfg <- list(
   window = 60,            # window width (bp, segment length with flanks)
@@ -954,11 +958,12 @@ mask_genome <- function(g, tempf) {
     t0 <- Sys.time()
     # -o with the .1ano extension: given a root, FasTAN drops everything after its
     # last dot (a.hap1_tan would give a.1ano)
-    status <- system(paste0("FasTAN -m -T", opt$threads, " -o", shQuote(ano), " ", shQuote(gdb)))
-    if (status != 0 || !file.exists(ano)) {
-      unlink(ano)
-      end_pantera(paste0("FasTAN failed on ", g, " (exit status ", status, "): ",
-                         basename(ano), " not written"))
+    status <- run_with_retries(
+      paste0("FasTAN -m -T", opt$threads, " -o", shQuote(ano), " ", shQuote(gdb)),
+      "FasTAN", ok = function() file.exists(ano), cleanup = function() unlink(ano))
+    if (status != 0) {
+      end_pantera(paste0("FasTAN failed on ", g, " (exit status ", status, ", ", tool_attempts,
+                         " attempts): ", basename(ano), " not written"))
     }
     lx(paste0("  Tandem arrays of ", basename(g), ": ", tandem_summary(ano), ", ",
               round(as.numeric(difftime(Sys.time(), t0, units = "secs"))), " s"))
@@ -972,13 +977,28 @@ mask_genome <- function(g, tempf) {
     lx(paste0("  Masked in ", basename(g), ": ", tandem_summary(mask),
               " (arrays of ", opt$tandem_min_len, " bp or more)"))
   }
+  # A mask without arrays cannot be read by GIXmake: the genome is indexed unmasked
+  mask_arg <- if (length(ano_lengths(ano_lines(mask))) > 0) {
+    paste0(" ", shQuote(paste0("#", mask)))
+  } else {
+    lx(paste0("  No tandem arrays to mask in ", basename(g)))
+    ""
+  }
   # Always rebuilt: the mask of an index can only be set when it is made
   dir.create(tempf, showWarnings = FALSE)
-  status <- system(paste0("GIXmake -T", opt$threads, " -P", shQuote(tempf), " ",
-                          shQuote(gdb), " ", shQuote(paste0("#", mask))))
+  gix <- sub("\\.1gdb$", ".gix", gdb)
+  status <- run_with_retries(
+    paste0("GIXmake -T", opt$threads, " -P", shQuote(tempf), " ", shQuote(gdb), mask_arg),
+    "GIXmake", ok = function() file.exists(gix),
+    cleanup = function() {
+      drop_gix(gdb)
+      unlink(tempf, recursive = TRUE)
+      dir.create(tempf, showWarnings = FALSE)
+    })
   unlink(tempf, recursive = TRUE)
-  if (status != 0 || !file.exists(sub("\\.1gdb$", ".gix", gdb))) {
-    end_pantera(paste0("GIXmake failed indexing ", g, " with its tandem mask (exit status ", status, ")"))
+  if (status != 0) {
+    end_pantera(paste0("GIXmake failed indexing ", g, " with its tandem mask (exit status ", status,
+                       ", ", tool_attempts, " attempts)"))
   }
   gdb
 }
@@ -1034,6 +1054,36 @@ drop_gix <- function(gdb) {
            Sys.glob(file.path(dirname(base), paste0(".", basename(base), ".ktab.*")))))
 }
 
+# Runs a shell command until it succeeds (exit status 0 and ok() TRUE), at most
+# tool_attempts times. After a failed attempt, cleanup() removes what it left.
+# Returns the exit status of the last attempt.
+run_with_retries <- function(cmd, what, ok = function() TRUE, cleanup = function() NULL) {
+  for (attempt in seq_len(tool_attempts)) {
+    status <- system(cmd)
+    if (status == 0 && ok()) {
+      return(status)
+    }
+    cleanup()
+    if (attempt < tool_attempts) {
+      lx(paste0("  ", what, " failed (exit status ", status, "), retrying (attempt ",
+                attempt + 1, " of ", tool_attempts, ")"))
+    }
+  }
+  if (status == 0) 1 else status
+}
+
+# Files FastGA makes next to a FASTA genome while aligning it (its GDB, sequence,
+# soft mask and index), when they are there. FastGA removes them when it ends,
+# but not always when it crashes.
+fastga_files <- function(g) {
+  d <- dirname(g)
+  s <- genome_stem(g)
+  f <- c(file.path(d, paste0(s, c(".1gdb", ".1ano", ".gix"))),
+         file.path(d, paste0(".", s, ".bps")),
+         Sys.glob(file.path(d, paste0(".", s, ".ktab.*"))))
+  f[file.exists(f)]
+}
+
 # Runs FastGA on two genomes and stops the run if no alignment was produced.
 # masked: a and b are GDBs indexed with their tandem mask (FastGA -M); names are
 # the genomes they come from, for the log
@@ -1047,13 +1097,24 @@ run_fastga <- function(i, a, b, aln, tempf, masked = FALSE, names = c(a, b)) {
     file.rename(old, aln)
   }
   if (!file.exists(aln)) {
+    # Only files made by a failed attempt are removed: not a GDB or index of the
+    # genome that was there before
+    before <- c(fastga_files(a), fastga_files(b))
     dir.create(tempf, showWarnings = FALSE)
-    status <- system(paste0("FastGA ", if (masked) "-M " else "", "-1:", aln, " -P", tempf,
-                            " ", shQuote(a), " ", shQuote(b)))
+    status <- run_with_retries(
+      paste0("FastGA ", if (masked) "-M " else "", "-1:", shQuote(aln), " -P", shQuote(tempf),
+             " ", shQuote(a), " ", shQuote(b)),
+      "FastGA",
+      ok = function() file.exists(aln) && file.size(aln) > 0,
+      cleanup = function() {
+        unlink(c(aln, setdiff(c(fastga_files(a), fastga_files(b)), before)))
+        unlink(tempf, recursive = TRUE)
+        dir.create(tempf, showWarnings = FALSE)
+      })
     unlink(tempf, recursive = TRUE)
-    if (status != 0 || !file.exists(aln) || file.size(aln) == 0) {
-      unlink(aln)
-      end_pantera(paste0("FastGA failed aligning ", a, " and ", b, " (exit status ", status, ")"))
+    if (status != 0) {
+      end_pantera(paste0("FastGA failed aligning ", a, " and ", b, " (exit status ", status,
+                         ", ", tool_attempts, " attempts)"))
     }
   }
 }
