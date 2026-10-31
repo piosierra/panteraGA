@@ -35,6 +35,7 @@ requirements:
     - cd-hit        # cd-hit-est
     - fastga        # FastGA, ONEview
     - alntools      # svfind
+    - fastan        # FasTAN (-t)
 
 test:
   commands:

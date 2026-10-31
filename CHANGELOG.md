@@ -7,6 +7,7 @@
 - `scripts/compare_runs.sh` compares the accepted libraries, for runs of this and earlier versions.
 
 ### Added
+- `-t/--tandem_mask`: the tandem arrays of each genome, found with FasTAN, are soft masked before aligning (FastGA `-M`), so FastGA starts no alignment in satellites and centromeres. Only arrays of at least `-w/--tandem_min_len` bp (default 1000; 0 masks all) are masked: short arrays add little alignment time, but are found inside some TEs, and masking them lost a young Gypsy with tandem repeats in its LTRs. With the two haplotypes of gorilla chromosome 22 (T2T), the alignment took 21 s instead of 632 s, masking 363 arrays of 1 kb or more (95% of the arrays' length); masking all 8,952 arrays took 20 s but kept fewer of the segments found without masking (176 of 201, against 186 masking arrays of 2 kb or more). Coordinates and sequences are those of the original genomes. The genome databases (`.1gdb`), FasTAN's arrays (`_tan.1ano`) and the masks (`_tan<w>.1ano`) are written to `tandem/` in the output folder, and kept with `-k` (the alignments refer to them) or `-d`. Needs FasTAN (new dependency, bioconda `fastan`); FAtoGDB and GIXmake come with FastGA.
 - Stats file: column `reason`, after `pass`: the rule that accepted or rejected the element (the last rule that decided, since rules run in order and later ones overwrite earlier ones).
 - Stats file: column `TSD_pvalue`, after `TSD_motif`: the p-value of the reported TSD (agreement between copies beyond chance, corrected for the TSD lengths tried). Empty when no TSD is reported. The consensus names in intermediate files carry it as `_tsdp`.
 
@@ -16,6 +17,9 @@
 - Removed: the rule accepting any element with TIRs within 3 bp of both ends, whatever its class (DNA and Unknown elements with TIRs are accepted by their own rules), and the rule making Unknowns with TIRs and an 8 bp TSD DNA (the next rule made every Unknown with TIRs DNA anyway).
 
 ### Fixed
+- FastGA, GIXmake and FasTAN are run up to 3 times when they fail. FastGA's index step (GIXmake) sometimes crashes with a segmentation fault (seen with bioconda's FastGA 1.5.20260729, about once in a few runs of the test genomes) and stopped the whole run; run again, it works. Before a new attempt, the files left by the failed one are removed: the partial alignment, and the GDB, mask and index files FastGA had made next to the genomes (files that were there before the run are kept). Each retry is logged.
+- `-t` with no tandem array at least `-w` bp long in a genome: GIXmake could not read the empty mask and the run stopped. That genome is now indexed without a mask.
+- `-d/--debug` kept almost no intermediate files: the segments (`pantera_lib_0.fa`), the loop 1 output (`segments_candidates.fa`), `loop_1/`, `loop_2/` and the consensi were deleted at the end of every run. They are now kept with `-d`.
 - `-i/--identity1` and `-y/--identity2` must be between 0.8 and 1. cd-hit-est refuses lower identities with the word length panteraGA uses, and the run stopped later with a misleading error ("cannot open the connection"). Values outside the range now stop the run at the start, with a message naming the option.
 - A TSD length found in a single copy no longer counts as a TSD. A long chance match in one copy (e.g. 11 bp in 1 of 5 copies) passed the significance test, and its length was reported with confidence 0 and no motif. The minimum number of copies sharing a TSD length is now 2 (`tsd_cfg$min_support`, also used for the motif). In the test data, two SINEs lose such 10-11 bp "TSDs"; nothing else changes.
 
