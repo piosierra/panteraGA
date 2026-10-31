@@ -69,7 +69,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-t, --tandem_mask` | | Soft mask the tandem arrays of each genome, found with [FasTAN](https://github.com/thegenemyers/FASTAN), before aligning (`FastGA -M`). Much faster with genomes rich in satellites, with almost the same segments (see [Tandem masking](#tandem-masking)). The genome databases and masks are written to `tandem/` in the output folder, and kept with `-k` or `-d` |
 | `-w, --tandem_min_len` | 1000 | With `-t`, min length of the tandem arrays masked, in bp. Shorter arrays add little alignment time, but are found inside some TEs (e.g. in LTRs), whose copies masking can lose. `0` masks them all |
 | `-k, --keep_alignments` | | Keep the FastGA alignments, named after the two genomes (`<genome1>_<genome2>.1aln`). A run reuses the alignments it finds in its output folder, including ones named `pantera<n>.1aln` by earlier versions |
-| `-d, --debug` | | Keep intermediate files, and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
+| `-d, --debug` | | Keep intermediate files (all segments in `pantera_lib_0.fa`, the loop 1 output in `segments_candidates.fa`, `loop_1/`, `loop_2/`, the consensi before classification), and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
 | `-V, --version` | | Show the version and exit |
 | `-h, --help` | | Show the options and exit |

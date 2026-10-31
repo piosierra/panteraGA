@@ -17,6 +17,7 @@
 - Removed: the rule accepting any element with TIRs within 3 bp of both ends, whatever its class (DNA and Unknown elements with TIRs are accepted by their own rules), and the rule making Unknowns with TIRs and an 8 bp TSD DNA (the next rule made every Unknown with TIRs DNA anyway).
 
 ### Fixed
+- `-d/--debug` kept almost no intermediate files: the segments (`pantera_lib_0.fa`), the loop 1 output (`segments_candidates.fa`), `loop_1/`, `loop_2/` and the consensi were deleted at the end of every run. They are now kept with `-d`.
 - `-i/--identity1` and `-y/--identity2` must be between 0.8 and 1. cd-hit-est refuses lower identities with the word length panteraGA uses, and the run stopped later with a misleading error ("cannot open the connection"). Values outside the range now stop the run at the start, with a message naming the option.
 - A TSD length found in a single copy no longer counts as a TSD. A long chance match in one copy (e.g. 11 bp in 1 of 5 copies) passed the significance test, and its length was reported with confidence 0 and no motif. The minimum number of copies sharing a TSD length is now 2 (`tsd_cfg$min_support`, also used for the motif). In the test data, two SINEs lose such 10-11 bp "TSDs"; nothing else changes.
 

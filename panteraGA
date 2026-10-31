@@ -2364,11 +2364,16 @@ cleanup <- function() {
   
   lx("Library successfully created.")
   unlink(outf("alignments", "X.CONS*"))
-  unlink(outf("loop_1"), recursive = TRUE)
-  unlink(outf("loop_2"), recursive = TRUE)
-  unlink(outf(c("orfs.tbl", "pantera_lib_0.fa", "all_segments_flanks.tsv",
-                "segments_candidates.fa", "temp.orfs")))
-  unlink(outf("*consensi*"))
+  # With -d the intermediates stay, to follow a segment through the run:
+  # pantera_lib_0.fa (all segments), segments_candidates.fa (loop 1 output),
+  # loop_1/ and loop_2/, and the consensi before classification
+  if (!opt$debug) {
+    unlink(outf("loop_1"), recursive = TRUE)
+    unlink(outf("loop_2"), recursive = TRUE)
+    unlink(outf(c("orfs.tbl", "pantera_lib_0.fa", "all_segments_flanks.tsv",
+                  "segments_candidates.fa", "temp.orfs")))
+    unlink(outf("*consensi*"))
+  }
   if (opt$keep_alignments == FALSE) {
     unlink(outf("*.1aln"))
     # The GDBs of -t are read through the alignments: kept with them, or with -d
