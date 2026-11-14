@@ -1,0 +1,49 @@
+input_id	id	length	label	confidence	evidence	sub	sub_source	sub_models	domains	fits_type	prot_score	prot_lead	runner_up	tir	partner	helitron	sine	alternatives	flags	notes
+Maverick_1-aPleWal#DNA/Maverick	Maverick_1-aPleWal	19595	POLINTON/Maverick	high	protein				ATPase,INT,POLB	yes	1469.9	1337.9	LTR/Gypsy:132							
+Gypsy_81-aPleWal#LTR/Gypsy	Gypsy_81-aPleWal	19579	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	22	AP,GAG,INT,RH,RT	yes	1075.8	600.8	LTR/ERV1:475							
+Gypsy_168-aPleWal#LTR/Gypsy	Gypsy_168-aPleWal	19499	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	22	AP,GAG,INT,RH,RT	yes	1107.4	618.4	LTR/ERV1:489							
+ERV1_50-aPleWal#LTR/ERV1	ERV1_50-aPleWal	18937	LTR/ERV1	high	protein				AP,ENV,GAG,INT,RH,RT	yes	1246.8	771.8	LTR/Orthoretrovirinae:475							
+Gypsy_328-aPleWal#LTR/Gypsy	Gypsy_328-aPleWal	18189	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	22	AP,GAG,INT,RH,RT	yes	1071.2	592.2	LTR/ERV1:479							
+PIF-Harbinger_75-aPleWal#DNA/PIF-Harbinger	PIF-Harbinger_75-aPleWal	17061	DNA/PIF-Harbinger	high	protein	Harbinger	protein	1	TPase	yes	179.0	151.0	DNA/ISL2EU:28							
+hAT_116-aPleWal#Unknown	hAT_116-aPleWal	12310		none																
+Unknown_2-aPleWal#LTR	Unknown_2-aPleWal	12105		none																
+Poseidon_6-aPleWal#PLE/Poseidon	Poseidon_6-aPleWal	9133		none																
+Ginger-2_2-aPleWal#LTR	Ginger-2_2-aPleWal	8857	LTR/Gypsy	low	protein	Gmr1-Osvaldo-Cer2-3	protein	1	GAG	no	71.7	37.7	LTR/Bel-Pao:34							close_runner_up:LTR/Bel-Pao
+hAT_82-aPleWal#LTR	hAT_82-aPleWal	8826		none																
+hAT_83-aPleWal#LTR	hAT_83-aPleWal	8764		none																
+hAT_84-aPleWal#LTR	hAT_84-aPleWal	8730		none																
+Ginger-2_3-aPleWal#LTR	Ginger-2_3-aPleWal	8714	LTR/Gypsy	low	protein	Gmr1-Osvaldo-Cer2-3	protein	1	GAG	no	70.0	39.0	LTR/Bel-Pao:31							close_runner_up:LTR/Bel-Pao
+Ginger-2_4-aPleWal#LTR	Ginger-2_4-aPleWal	8713	LTR/Gypsy	low	protein	Gmr1-Osvaldo-Cer2-3	protein	1	GAG	no	72.5	38.5	LTR/Bel-Pao:34							close_runner_up:LTR/Bel-Pao
+Ginger-2_6-aPleWal#LTR	Ginger-2_6-aPleWal	8619	LTR/Gypsy	low	protein	Gmr1-Osvaldo-Cer2-3	protein	1	GAG	no	71.1	39.1	LTR/Bel-Pao:32							close_runner_up:LTR/Bel-Pao
+Ginger-2_8-aPleWal#LTR	Ginger-2_8-aPleWal	8572	LTR/Gypsy	low	protein	Gmr1-Osvaldo-Cer2-3	protein	1	GAG	no	71.0	37.0	LTR/Bel-Pao:34							close_runner_up:LTR/Bel-Pao
+Ginger-2_10-aPleWal#LTR/Gypsy	Ginger-2_10-aPleWal	7711	LTR/Gypsy	low	protein	Gmr1-Osvaldo-Cer2-3	protein	1	AP	no	59.0	59.0								
+Unknown_99-aPleWal#DNA	Unknown_99-aPleWal	2341	DNA/hAT	high	TIR									DNA/hAT:both:high	-:hAT-5_TilSci:curated:one:53.6					
+Unknown_105-aPleWal#LTR	Unknown_105-aPleWal	2317	DNA/hAT	low	TIR	Tip100	TIR							DNA/hAT:both:low:Tip100						
+Unknown_106-aPleWal#Unknown	Unknown_106-aPleWal	2315	DNA/hAT	low	TIR	Tip100	TIR							DNA/hAT:both:low:Tip100						
+Unknown_107-aPleWal#LTR	Unknown_107-aPleWal	2313	DNA/hAT	low	TIR	Tip100	TIR							DNA/hAT:both:low:Tip100						
+Unknown_108-aPleWal#LTR	Unknown_108-aPleWal	2307	DNA/hAT	low	TIR	Tip100	TIR							DNA/hAT:both:low:Tip100						
+Unknown_110-aPleWal#LTR	Unknown_110-aPleWal	2283	DNA/hAT	low	TIR	Tip100	TIR							DNA/hAT:both:low:Tip100						
+Unknown_111-aPleWal#LTR	Unknown_111-aPleWal	2283	DNA/hAT	low	TIR	Tip100	TIR							DNA/hAT:both:low:Tip100						
+Unknown_160-aPleWal#DNA	Unknown_160-aPleWal	1737	DNA/hAT	high	TIR									DNA/hAT:both:high	-:Buster_TreBer:curated:one:61.7					
+Unknown_166-aPleWal#DNA/hAT	Unknown_166-aPleWal	1709	DNA/hAT	high	TIR									DNA/hAT:both:high	-:Buster_TreBer:curated:one:65.3					
+Unknown_175-aPleWal#Unknown	Unknown_175-aPleWal	1567	DNA/PIF-Harbinger	low	partner	Harbinger	partner								DNA/PIF-Harbinger:PIF-Harbinger_75-aPleWal:library:both:126.1:library=DNA/PIF-Harbinger					
+Unknown_181-aPleWal#Unknown	Unknown_181-aPleWal	1466	DNA/PIF-Harbinger	low	partner	Harbinger	partner								DNA/PIF-Harbinger:PIF-Harbinger_75-aPleWal:library:both:127.0:library=DNA/PIF-Harbinger					
+Unknown_203-aPleWal#Unknown	Unknown_203-aPleWal	937	DNA/PIF-Harbinger	low	partner	Harbinger	partner								DNA/PIF-Harbinger:PIF-Harbinger_75-aPleWal:library:both:213.7:library=DNA/PIF-Harbinger					
+Unknown_206-aPleWal#Unknown	Unknown_206-aPleWal	935	DNA/PIF-Harbinger	low	partner	Harbinger	partner								DNA/PIF-Harbinger:PIF-Harbinger_75-aPleWal:library:both:218.2:library=DNA/PIF-Harbinger					
+Unknown_207-aPleWal#Unknown	Unknown_207-aPleWal	935	DNA/PIF-Harbinger	low	partner	Harbinger	partner								DNA/PIF-Harbinger:PIF-Harbinger_75-aPleWal:library:both:211.7:library=DNA/PIF-Harbinger					
+Unknown_209-aPleWal#Unknown	Unknown_209-aPleWal	935	DNA/PIF-Harbinger	low	partner	Harbinger	partner								DNA/PIF-Harbinger:PIF-Harbinger_75-aPleWal:library:both:209.7:library=DNA/PIF-Harbinger					
+ERV1_4-aPleWal#LTR/ERV1	ERV1_4-aPleWal	565	LTR/ERV1	weak	protein				INT	no	255.3	73.3	LTR/Orthoretrovirinae:182					DNA/Ginger-1,DNA/Ginger-2,DNA/IS481EU,POLINTON		single_domain:INT
+Unknown_370-aPleWal#Unknown	Unknown_370-aPleWal	539	DNA/hAT	high	TIR									DNA/hAT:both:high	-:hAT-5_TilSci:curated:one:62.6					
+Unknown_382-aPleWal#DNA/hAT	Unknown_382-aPleWal	404	DNA/hAT	high	TIR									DNA/hAT:both:high	-:Buster_TreBer:curated:one:56.3					
+rf:rfamgene_13_AB035922.1/6128-6200	rf:rfamgene_13_AB035922.1_6128-6200	73		none															ncRNA:tRNA	
+rf:rfamgene_21_AB042432.1/6942-7011	rf:rfamgene_21_AB042432.1_6942-7011	70		none																
+rf:rfamgene_25_AB042809.1/5159-5089	rf:rfamgene_25_AB042809.1_5159-5089	71		none															ncRNA:tRNA	
+rf:rfamgene_32_AC004941.2/32735-32806	rf:rfamgene_32_AC004941.2_32735-32806	72		none													RNA_gene-like:high:SINE/tRNA_Promoter:HEAD:tRNA:all		ncRNA:tRNA	
+rf:rfamgene_42_AC008670.6/83597-83665	rf:rfamgene_42_AC008670.6_83597-83665	69		none															ncRNA:tRNA	
+rf:rfamgene_50_AC018907.5/9587-9517	rf:rfamgene_50_AC018907.5_9587-9517	71		none													RNA_gene-like:high:SINE/tRNA_Promoter:HEAD:tRNA:c23		ncRNA:tRNA	
+rf:rfamgene_2237_AAZN01000309.1/86876-87072	rf:rfamgene_2237_AAZN01000309.1_86876-87072	197	SINE/U-RNA_Promoter	high	SINE												SINE/U-RNA_Promoter:high:SINE/U-RNA_Promoter:HEAD:U2:all		ncRNA:U2	
+rf:rfamgene_2279_AF326335.1/1-142	rf:rfamgene_2279_AF326335.1_1-142	142	SINE/U-RNA_Promoter	high	SINE												SINE/U-RNA_Promoter:high:SINE/U-RNA_Promoter:HEAD:U2:all		ncRNA:U2	
+mr:NM_000977.4	mr:NM_000977.4	300	SINE/7SL-RNA_Promoter	low	SINE												SINE/7SL-RNA_Promoter:low:-			
+mr:NM_001007024.2	mr:NM_001007024.2	300	SINE/tRNA_Promoter	low	SINE												SINE/tRNA_Promoter:low:-			
+mr:NM_001025930.5	mr:NM_001025930.5	300	SINE/7SL-RNA_Promoter	low	SINE												SINE/7SL-RNA_Promoter:low:-			
+mr:NM_001144756.2	mr:NM_001144756.2	300	SINE/7SL-RNA_Promoter	low	SINE												SINE/7SL-RNA_Promoter:low:-			
