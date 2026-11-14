@@ -1042,7 +1042,9 @@ hmm_classify <- function(input, outdir, libdir, threads = 1L, chunk = NULL, keep
   hc_write(P, file.path(outdir, "prot_calls.tsv")); hc_write(Ti, file.path(outdir, "tir_calls.tsv"))
   hc_write(H, file.path(outdir, "hel_calls.tsv")); hc_write(S, file.path(outdir, "sine_calls.tsv"))
   hc_write(all[, .(id, input_id)], file.path(outdir, "ids.tsv"))
-  if (!keep) unlink(file.path(outdir, c("chunks", "partners", "lib")), recursive = TRUE)
+  # lib/ holds only the decompressed copies of the models (about 800 MB), not results: always removed
+  unlink(file.path(outdir, "lib"), recursive = TRUE)
+  if (!keep) unlink(file.path(outdir, c("chunks", "partners")), recursive = TRUE)
   cn <- r$classification[, .N, by = confidence]
   hc_log("HMM classifier:", paste(cn$confidence, cn$N, collapse = ", "))
   r$classification

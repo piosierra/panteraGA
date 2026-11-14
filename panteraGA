@@ -36,6 +36,9 @@ pantera_home <- Sys.getenv("PANTERA_HOME",
                            } else {
                              getwd()
                            })
+# Code that goes with this script (the classifier and its label map) is read from the script's own folder, so it
+# always matches the script's version; only the HMM libraries (model/hmm, large) come from pantera_home.
+pantera_code <- if (nzchar(pantera_script)) dirname(pantera_script) else getwd()
 
 
 
@@ -100,10 +103,17 @@ tsd_cfg <- list(
   min_strict_count = 6    #   and min number of strict calls at the same offset
 )
 
-# Classification
+# Classification (HMM classifier, scripts/pantera_classify.R; its own settings are hmm_cfg in that file)
 class_cfg <- list(
-  min_prob = 0.4          # min classifier probability; below it the class is Unknown
+  min_sub_models = 2      # a protein sub label is reported only if its label has at least this many sub-label
+                          #   models (with one, every hit gets it: e.g. every CR1 would be Zenon)
 )
+
+# Homology columns kept from the HMM classifier: internal name -> column of the stats file
+hom_stats <- c(hom_label = "homology_label", hom_confidence = "homology_confidence",
+               hom_evidence = "homology_evidence", hom_sub = "homology_sub", hom_domains = "homology_domains",
+               hom_alternatives = "homology_alternatives", hom_flags = "homology_flags",
+               hom_notes = "homology_notes")
 
 # Structure rules (stats_tes): which elements pass, and reclassification.
 # "gap" is the distance in bp from a terminal repeat (LTR or TIR) to the element end.
@@ -161,7 +171,7 @@ lx <- function(x) {
 # Loads the required libraries. They are installed as dependencies by conda.
 get_libs <- function() {
   pkgs <- c("getopt", "parallel", "Biostrings", "stringi",
-            "ape", "xgboost", "quantmod", "data.table")
+            "ape", "quantmod", "data.table")
   for (p in pkgs) {
     if (!suppressPackageStartupMessages(require(p, character.only = TRUE,
                                                 quietly = TRUE))) {
@@ -521,6 +531,9 @@ parseONEview <- function(genomes) {
 # Path of a file in the output folder
 outf <- function(...) file.path(opt$output_folder, ...)
 
+# Folder of the HMM classifier's libraries: the pantera_hmm_v1 folder, unpacked as model/hmm in pantera_home
+hmm_libdir <- function() file.path(pantera_home, "model", "hmm")
+
 # Reverse complement of a DNA sequence
 rc <- function(s) {
   stri_reverse(chartr("ACGTacgt","TGCAtgca",s))
@@ -818,8 +831,12 @@ init_pantera <- function() {
   if (!(nchar(Sys.which("mafft")) > 0)) {
     end_pantera("mafft not found")
   }
-  if (!(nchar(Sys.which("getorf")) > 0)) {
-    end_pantera("getorf not found")
+  # HMM classifier: HMMER, miniprot, Infernal, TRF, BLAST (dustmasker, makeblastdb, blastn)
+  for (tool in c("hmmsearch", "nhmmer", "miniprot", "cmscan", "cmfetch", "cmalign", "trf", "dustmasker",
+                 "makeblastdb")) {
+    if (!(nchar(Sys.which(tool)) > 0)) {
+      end_pantera(paste(tool, "not found (needed by the HMM classifier)"))
+    }
   }
   if (!(nchar(Sys.which("blastn")) > 0)) {
     end_pantera("blastn not found")
@@ -841,18 +858,22 @@ init_pantera <- function() {
     }
   }
 
-  for (f in c("model/typesnames", "model/featurenames", "model/xgbmodel.ubj",
-              "libs/RepeatPeps.lib", "libs/RepeatPeps.lib.psq")) {
-    if (!file.exists(file.path(pantera_home, f))) {
-      end_pantera(paste("Required file not found:", file.path(pantera_home, f)))
+  # The classifier and its label map (next to this script) and the HMM libraries (pantera_home/model/hmm, the
+  # pantera_hmm_v1 folder)
+  for (f in c(file.path(pantera_code, "scripts", "pantera_classify.R"), file.path(pantera_code, "model", "label_map.tsv"),
+              file.path(hmm_libdir(), "prot", "pantera_v5.cal.hmm.gz"))) {
+    if (!file.exists(f)) {
+      end_pantera(paste("Required file not found:", f))
     }
   }
-  # A Git LFS pointer instead of the real model is a few hundred bytes
-  if (file.size(file.path(pantera_home, "model/xgbmodel.ubj")) < 1e6) {
-    end_pantera("model/xgbmodel.ubj is not a valid model (Git LFS pointer?)")
+  source(file.path(pantera_code, "scripts", "pantera_classify.R"))
+  if (file.exists(file.path(hmm_libdir(), "flags", "sp_euk_host.dmnd")) && !(nchar(Sys.which("diamond")) > 0)) {
+    end_pantera("diamond not found (needed by the host-protein part of the HMM libraries)")
   }
   
   lx(paste("panteraGA path:", pantera_script))
+  lx(paste("HMM libraries:", hmm_libdir(),
+           if (file.exists(file.path(hmm_libdir(), "flags", "sp_euk_host.dmnd"))) "(with host proteins)" else ""))
   lx(paste("Genomes list file:", opt$genomes))
   lx(paste("Output folder:", opt$output_folder))
   lx(paste("Threads to use:", opt$threads))
@@ -1990,90 +2011,51 @@ classify_tes <- function() {
   file <- outf(paste0(opt$lib_name, "-consensi.fa"))
   wfasta(final[, c("name", "seq")], file)
   lx(paste("Final consensi: ", nrow(final)))
-  lx("Reading orfs")
-  # BLAST: -mt_mode 1 splits the work between threads by query. The default splits by
-  # database, which with one small database leaves most threads idle. Same hits.
-  system(
-    paste0(
-      "getorf -sequence ", shQuote(file),
-      " --outseq ", shQuote(outf("temp.orfs")), " -minsize 100 >/dev/null 2>&1; blastp -num_threads ", opt$threads, " -mt_mode 1",
-      " -query ", shQuote(outf("temp.orfs")), " -db ",
-      shQuote(file.path(pantera_home, "libs/RepeatPeps.lib")),
-      " -outfmt 6 -evalue 1e-1 > ", shQuote(outf("orfs.tbl"))
-    )
-  )
-  lx("Reading data")
-  orfs <- fread(outf("orfs.tbl"), header = F)
-  result <- data.table()
-  if (nrow(orfs) > 0) {
-    types <-
-      read.table(file.path(pantera_home, "model/typesnames"),
-                 sep = "\n")
-    types <- types$V1
-    features <-
-      read.table(file.path(pantera_home, "model/featurenames"),
-                 sep = "\n")
-    features <- features$V1
-    xgb.fit <-
-      xgb.load(file.path(pantera_home, "model/xgbmodel.ubj"))
-    lx("Processing")
-    orfs[, V1 := gsub("_[0-9]*$", "", V1)]
-    orfs[, prot := gsub(".*#", "", V2)]
-    
-    orfs_table <-
-      dcast(
-        orfs,
-        V1 ~ prot,
-        value.var = "V12",
-        fun.agg = function(x) {
-          suppressWarnings(max(x))
-        }
-      )
-    orfs_table[is.na(orfs_table), ] <- 0
-    orfs_table[orfs_table == -Inf, ] <- 0
-    
-    names <- orfs_table$V1
-    orfs_table$V1 <- NULL
-    
-    colnames(orfs_table) <- make.names(colnames(orfs_table))
-    if (sum(!(colnames(orfs_table) %in% features)) > 0) {
-      orfs_table[, colnames(orfs_table)[!(colnames(orfs_table) %in% features)] :=
-                   NULL]
-    }
-    orfs_table[, features[!(features %in% colnames(orfs_table))] := 0]
-    setcolorder(orfs_table, features)
-    xgb.pred2 = predict(xgb.fit, orfs_table)
-    xgb.pred2 = as.data.frame(xgb.pred2)
-    colnames(xgb.pred2) = types
-    xgb.pred2$prediction = apply(xgb.pred2, 1, function(x)
-      colnames(xgb.pred2)[which.max(x)])
-    xgb.pred2$prob = apply(xgb.pred2[1:ncol(xgb.pred2) - 1], 1, function(x)
-      max(x))
-    
-    result <-
-      data.table(
-        name = paste0(">", names),
-        Prediction = xgb.pred2$prediction,
-        Probability = xgb.pred2$prob
-      )
-  }
-  
-  lx("Merge")
-  if (nrow(result) > 0) {
-    final <- merge(final, result, by = "name", all.x = TRUE, sort = FALSE)
-  } else {
-    final[, `:=`(Prediction = NA_character_, Probability = NA_real_)]
-  }
-  # Keep the classifier's own call for curators, whatever its probability
-  final[, `:=`(hom_class = fifelse(is.na(Prediction), "none", Prediction),
-               hom_prob  = fifelse(is.na(Probability), 0, round(Probability, 3)))]
-  final[is.na(Prediction) | is.na(Probability) | Probability < class_cfg$min_prob, Prediction := "Unknown"]
+  # Homology: the HMM classifier (scripts/pantera_classify.R), one call per consensus from protein domains, TIR
+  # and Helitron ends, end partners and SINE models (with flags for tandem, low-complexity, ncRNA and host-protein
+  # sequences). Its label becomes the class through model/label_map.tsv; with no call the class is Unknown.
+  hc <- hmm_classify(file, outf("hmm_classifier"), hmm_libdir(), threads = opt$threads, keep = opt$debug)
+  hom <- hom_columns(hc, fread(file.path(pantera_code, "model", "label_map.tsv"), sep = "\t", quote = "",
+                               colClasses = "character", na.strings = NULL))
+  final[, input_id := sub("^>", "", name)]
+  hcols <- c(names(hom_stats), "Prediction")
+  final[hom, on = "input_id", (hcols) := mget(paste0("i.", hcols))]   # update join: keeps the order of final
+  final[, input_id := NULL]
+  final[is.na(Prediction), `:=`(Prediction = "Unknown", hom_label = "none", hom_confidence = "none")]
+  lx(paste("Classified:", paste(names(table(final$hom_confidence)), table(final$hom_confidence), collapse = ", ")))
   final <- final[order(-nchar(seq))]
   # Working name: unique id + class. Final names are set at the end of stats_tes().
   final[, name := paste0(name, "#", Prediction)]
   fwrite(final, paste0(file, ".statspre"), sep = "\t")
   return(final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "gencount", "aln_file",
-                   "hom_class", "hom_prob")])
+                   names(hom_stats)), with = FALSE])
+}
+
+# Homology columns of each consensus, from the HMM classifier's table (hc) and the label map (lmap): Prediction is
+# the class written in the library (the RepeatMasker name of the label; Unknown when there is no call), the other
+# columns go to the stats. A protein sub label is not reported when its label has fewer than
+# class_cfg$min_sub_models sub-label models: with a single model, every hit of the label gets that sub label (e.g.
+# every CR1 would be Zenon).
+hom_columns <- function(hc, lmap) {
+  h <- hc[, .(input_id, hom_label = fifelse(label == "", "none", label), hom_confidence = confidence,
+              hom_evidence = evidence, hom_sub = sub, sub_source, sub_models, hom_domains = domains,
+              hom_alternatives = alternatives, hom_flags = flags, hom_notes = notes)]
+  single <- h$sub_source == "protein" & suppressWarnings(as.integer(h$sub_models)) < class_cfg$min_sub_models
+  h[which(single), hom_sub := ""]
+  # RepeatMasker name of the label, or of label + sub label when the map has a row for that sub label (e.g.
+  # DNA/Tc1-Mariner with sub label Pogo -> DNA/TcMar-Pogo); only sub labels that are reported count
+  base <- lmap[sub == ""]
+  subs <- lmap[sub != ""]
+  h[, Prediction := base$repeatmasker[match(hom_label, base$label)]]
+  refined <- subs$repeatmasker[match(paste(h$hom_label, h$hom_sub), paste(subs$label, subs$sub))]
+  h[!is.na(refined) & hom_sub != "", Prediction := refined[!is.na(refined) & hom_sub != ""]]
+  unmapped <- h[hom_confidence != "none" & is.na(Prediction), unique(hom_label)]
+  if (length(unmapped) > 0) {
+    lx(paste("Labels missing from model/label_map.tsv (class Unknown):", paste(unmapped, collapse = ", ")))
+  }
+  h[hom_confidence == "none" | is.na(Prediction), Prediction := "Unknown"]
+  h[, c("sub_source", "sub_models") := NULL]
+  h
 }
 
 
@@ -2084,7 +2066,7 @@ classify_tes <- function() {
 stats_tes <- function(final, genomes) {
   lx("Stats start")
   tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "gencount", "aln_file",
-                   "hom_class", "hom_prob")]
+                   names(hom_stats)), with = FALSE]
   temp <- outf(paste0("temp", make.names(paste0(opt$lib_name, "-consensi.fa"))))
   dir.create(temp)
   tmp_tes <- file.path(temp, "tmp-tes")
@@ -2367,15 +2349,15 @@ stats_tes <- function(final, genomes) {
   # (their reasons are in the stats file, which lists both)
   wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
   wfasta(tes[pass == F, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-rejected.fa")))
-  stats_data <- tes[, c("name", "lente", "pass", "reason", "hom_class", "hom_prob", "cluster", "tsd_l", "tsd_c", "tsd_m",
+  stats_data <- tes[, c("name", "lente", "pass", "reason", names(hom_stats), "cluster", "tsd_l", "tsd_c", "tsd_m",
                         "tsd_p", "gencount", "type", "length", "lgap", "rgap", "pa", "tail3_motif", "tail3_len",
                         "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of",
-                        "orf1", "orf2", "orf3", "maxRep", "Ns")]
+                        "orf1", "orf2", "orf3", "maxRep", "Ns"), with = FALSE]
   ### Last fixes
   stats_data[tsd_m == "" | is.na(tsd_m), tsd_c := 0]
   stats_data$pa <- stats_data$pa < opt$min_polya
   
-  colnames(stats_data) <- c("name", "TE_len", "pass", "reason", "homology_class", "homology_prob", "cluster_size",
+  colnames(stats_data) <- c("name", "TE_len", "pass", "reason", unname(hom_stats), "cluster_size",
                             "TSD_length", "TSD_confidence", "TSD_motif", "TSD_pvalue",
                             "gen_count", "struct_type", "struct_len", "left_gap",
                             "right_gap", "polyA", "tail3_motif", "tail3_len", "tail5_motif", "tail5_len",
@@ -2427,12 +2409,12 @@ cleanup <- function() {
   unlink(outf("alignments", "X.CONS*"))
   # With -d the intermediates stay, to follow a segment through the run:
   # pantera_lib_0.fa (all segments), segments_candidates.fa (loop 1 output),
-  # loop_1/ and loop_2/, and the consensi before classification
+  # loop_1/ and loop_2/, the consensi before classification, and the classifier's files (hmm_classifier/)
   if (!opt$debug) {
     unlink(outf("loop_1"), recursive = TRUE)
     unlink(outf("loop_2"), recursive = TRUE)
-    unlink(outf(c("orfs.tbl", "pantera_lib_0.fa", "all_segments_flanks.tsv",
-                  "segments_candidates.fa", "temp.orfs")))
+    unlink(outf(c("pantera_lib_0.fa", "all_segments_flanks.tsv", "segments_candidates.fa")))
+    unlink(outf("hmm_classifier"), recursive = TRUE)
     unlink(outf("*consensi*"))
   }
   if (opt$keep_alignments == FALSE) {

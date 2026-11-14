@@ -15,9 +15,15 @@ if [ ! -x "$ENV_PREFIX/bin/Rscript" ]; then
   exit 1
 fi
 
-# Data (libs/, model/) from the installed package, whatever its version
+# HMM libraries (model/hmm): from the clone when unpacked there (pantera_hmm_v1.tar.gz -> model/hmm), otherwise
+# from the installed package, whatever its version. The classifier and model/label_map.tsv always come from the
+# clone (next to the script).
 shopt -s nullglob
-homes=("$ENV_PREFIX"/share/panteraga-*)
+if [ -d "$REPO/model/hmm" ]; then
+  homes=("$REPO")
+else
+  homes=("$ENV_PREFIX"/share/panteraga-*)
+fi
 if [ ${#homes[@]} -ne 1 ]; then
   echo "Expected exactly one panteraga-* folder in $ENV_PREFIX/share, found ${#homes[@]}" >&2
   exit 1

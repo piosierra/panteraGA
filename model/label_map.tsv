@@ -1,0 +1,112 @@
+label	sub	repeatmasker	emitted_by	note
+CRYPTON/Crypton		DNA/Crypton	protein	
+CRYPTON/Crypton-A		DNA/Crypton-A	protein	
+CRYPTON/Crypton-F		DNA/Crypton-F	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+CRYPTON/Crypton-I		DNA/Crypton-I	protein	
+CRYPTON/Crypton-S		DNA/Crypton-S	protein	
+CRYPTON/Crypton-V		DNA/Crypton-V	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+DIRS/DIRS		LTR/DIRS	protein	
+DIRS/Ngaro		LTR/Ngaro	protein	
+DIRS/PAT		LTR/DIRS	protein	no RepeatMasker class for PAT; DIRS-like YR element
+DNA		DNA	TIR	
+DNA/Academ		DNA/Academ-1	partner,protein,TIR	RepeatMasker has Academ-1, -2, -H
+DNA/CMC		DNA/CMC	partner,protein,TIR	
+DNA/CMC	Chapaev	DNA/CMC-Chapaev	partner,TIR	sub label refines the name
+DNA/CMC	Chapaev-3	DNA/CMC-Chapaev-3	partner,TIR	sub label refines the name
+DNA/CMC	EnSpm	DNA/CMC-EnSpm	partner,protein,TIR	sub label refines the name
+DNA/CMC	Mirage	DNA/CMC-Mirage	TIR	sub label refines the name
+DNA/Dada		DNA/Dada	partner,TIR	
+DNA/EnSpm		DNA/CMC-EnSpm	partner,protein	
+DNA/Ginger-1		DNA/Ginger-1	partner,protein,TIR	
+DNA/Ginger-2		DNA/Ginger-2	partner,protein,TIR	
+DNA/IS3EU		DNA/IS3EU	partner,protein,TIR	
+DNA/ISL2EU		DNA/PIF-ISL2EU	partner,protein	
+DNA/Kolobok		DNA/Kolobok	partner,protein,TIR	
+DNA/Kolobok	T2	DNA/Kolobok-T2	partner,protein,TIR	sub label refines the name
+DNA/Merlin		DNA/Merlin	partner,protein,TIR	
+DNA/Mutator-like		DNA/MULE-MuDR	partner,protein,TIR	RepeatMasker name (class table gave DNA/MULE)
+DNA/Novosib		DNA/Novosib	partner,TIR	
+DNA/PIF-Harbinger		DNA/PIF-Harbinger	partner,protein,TIR	RepeatMasker name (class table gave DNA/PIF)
+DNA/P_Element		DNA/P	partner,protein,TIR	
+DNA/PiggyBac		DNA/PiggyBac	partner,protein,TIR	
+DNA/Sola-1		DNA/Sola-1	partner,protein,TIR	
+DNA/Sola-2		DNA/Sola-2	partner,protein,TIR	
+DNA/Sola-3		DNA/Sola-3	partner,protein,TIR	
+DNA/Tc1-Mariner		DNA/TcMar	partner,protein,TIR	
+DNA/Tc1-Mariner	Ant1	DNA/TcMar-Ant1	TIR	sub label refines the name
+DNA/Tc1-Mariner	Fot1	DNA/TcMar-Fot1	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	ISRm11	DNA/TcMar-ISRm11	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	Mariner	DNA/TcMar-Mariner	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	Pogo	DNA/TcMar-Pogo	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	Tc1	DNA/TcMar-Tc1	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	Tc2	DNA/TcMar-Tc2	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	Tc4	DNA/TcMar-Tc4	partner,TIR	sub label refines the name
+DNA/Tc1-Mariner	Tigger	DNA/TcMar-Tigger	partner,protein,TIR	sub label refines the name
+DNA/Tc1-Mariner	m44	DNA/TcMar-m44	partner,TIR	sub label refines the name
+DNA/Transib		DNA/CMC-Transib	partner,protein,TIR	
+DNA/Zator		DNA/Zator	partner,protein,TIR	
+DNA/Zisupton		DNA/Zisupton	TIR	
+DNA/hAT		DNA/hAT	partner,protein,TIR	
+DNA/hAT	Blackjack	DNA/hAT-Blackjack	partner,protein,TIR	sub label refines the name
+DNA/hAT	Charlie	DNA/hAT-Charlie	partner,protein,TIR	sub label refines the name
+DNA/hAT	Restless	DNA/hAT-Restless	partner,TIR	sub label refines the name
+DNA/hAT	Tag1	DNA/hAT-Tag1	partner,TIR	sub label refines the name
+DNA/hAT	Tip100	DNA/hAT-Tip100	partner,protein,TIR	sub label refines the name
+DNA/hAT	hAT19	DNA/hAT-hAT19	TIR	sub label refines the name
+DNA/hAT	hAT5	DNA/hAT-hAT5	partner,protein,TIR	sub label refines the name
+DNA/hAT	hAT6	DNA/hAT-hAT6	TIR	sub label refines the name
+DNA/hAT	hATm	DNA/hAT-hATm	partner,TIR	sub label refines the name
+DNA/hAT	hATw	DNA/hAT-hATw	partner,TIR	sub label refines the name
+DNA/hAT	hATx	DNA/hAT-hATx	partner,TIR	sub label refines the name
+DNA/hAT	hobo	DNA/hAT-hobo	partner,TIR	sub label refines the name
+LINE		LINE	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+LINE/Ambal		LINE/CRE-Ambal	protein	
+LINE/CR1		LINE/CR1	protein	
+LINE/CR1	Zenon	LINE/CR1-Zenon	protein	sub label refines the name
+LINE/CRE		LINE/CRE	protein	
+LINE/Dong-R4		LINE/Dong-R4	protein	
+LINE/Dualen		LINE/Dualen	protein	
+LINE/Hero		LINE/R2-Hero	protein	
+LINE/I		LINE/I	protein	
+LINE/Jockey		LINE/I-Jockey	protein	
+LINE/L1		LINE/L1	protein	
+LINE/L2		LINE/L2	protein	
+LINE/LOA		LINE/R1-LOA	protein	
+LINE/NeSL		LINE/R2-NeSL	protein	
+LINE/Proto-1		LINE/Proto1	protein	
+LINE/Proto-2		LINE/Proto2	protein	
+LINE/R1		LINE/R1	protein	
+LINE/R2		LINE/R2	protein	
+LINE/RTE-X		LINE/RTE-X	protein	
+LINE/RTE-like		LINE/RTE	protein	
+LINE/RTE-like	BovB	LINE/RTE-BovB	protein	sub label refines the name
+LINE/Rex-Babar		LINE/Rex-Babar	protein	
+LINE/Tad1		LINE/Tad1	protein	
+LINE/Tx1		LINE/L1-Tx1	protein	
+LTR		LTR	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+LTR/Bel-Pao		LTR/Pao	protein	
+LTR/Caulimoviridae		LTR/Caulimovirus	protein	
+LTR/ERV1		LTR/ERV1	protein	
+LTR/ERV2		LTR/ERVK	protein	
+LTR/ERV3		LTR/ERVL	protein	
+LTR/ERV4		LTR/ERV4	protein	
+LTR/Gypsy		LTR/Gypsy	protein	
+LTR/Lenti		LTR/ERV-Lenti	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+LTR/Orthoretrovirinae		LTR/ERV	protein	
+LTR/Ty1-Copia		LTR/Copia	protein	
+PLE		PLE	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+PLE/Athena		PLE/Athena	protein	
+PLE/Coprina		PLE/Coprina	protein	
+PLE/Hydra		PLE/Hydra	repbase_map	not emitted by the classifier; RepBase labels (benchmark)
+PLE/Nematis		PLE/Nematis	protein	
+PLE/Neptune		PLE/Neptune	protein	
+PLE/Poseidon		PLE/Poseidon	protein	
+POLINTON/Maverick		DNA/Maverick	protein,TIR	
+RC		RC	Helitron,protein	
+RC/Helentron		RC/Helentron	Helitron	
+RC/Helitron-1		RC/Helitron	Helitron	
+SINE/5S-RNA_Promoter		SINE/5S	SINE	
+SINE/7SL-RNA_Promoter		SINE/7SL	SINE	
+SINE/U-RNA_Promoter		SINE/U	SINE	U snRNA-derived SINE
+SINE/tRNA_Promoter		SINE/tRNA	SINE	tRNA-derived SINE
+SINE/tRNA_and_7SL_RNA		SINE/tRNA-7SL	SINE	tRNA + 7SL dimer

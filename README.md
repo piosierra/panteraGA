@@ -15,7 +15,7 @@ conda create -n pantera -c conda-forge -c bioconda panteraga
 conda activate pantera
 ```
 
-This installs panteraGA with all its dependencies (FastGA, FasTAN, alntools, BLAST, MAFFT, CD-HIT, EMBOSS and the R packages) and the classification model.
+This installs panteraGA with all its dependencies (FastGA, FasTAN, alntools, BLAST, MAFFT, CD-HIT, HMMER, miniprot, Infernal, TRF and the R packages) and the HMM libraries of the classifier.
 
 ### Containers
 
@@ -29,9 +29,9 @@ singularity exec panteraGA.sif panteraGA -g genomes.txt -b mylib -o out
 
 ### From source
 
-Cloning the repository is only needed for development. The classification model is not stored in git: download `model.tar.gz` from [Zenodo](https://zenodo.org/records/22990589) and unpack `xgbmodel.ubj` into `model/`. The dependencies listed in [`recipes/panteraga/meta.yaml`](recipes/panteraga/meta.yaml) must be on the `PATH`.
+Cloning the repository is only needed for development. The HMM libraries of the classifier are not stored in git: download `pantera_hmm_v1.tar.gz` (47 MB) <!-- TODO before 2.0.0: Zenodo record of pantera_hmm_v1 --> and unpack it as `model/hmm/` (`tar -xzf pantera_hmm_v1.tar.gz && mv pantera_hmm_v1 model/hmm`). The optional `pantera_hmm_v1_host.tar.gz` (60 MB, Swiss-Prot host proteins, needs DIAMOND) adds the `host_protein` flag; unpack it next to the first one, before moving the folder. The dependencies listed in [`recipes/panteraga/meta.yaml`](recipes/panteraga/meta.yaml) must be on the `PATH`.
 
-panteraGA looks for `libs/` and `model/` next to the script, or in the folder given by the `PANTERA_HOME` environment variable.
+panteraGA reads the classifier (`scripts/pantera_classify.R`) and its label map (`model/label_map.tsv`) from its own folder, and the HMM libraries from `model/hmm/` next to the script, or in the folder given by the `PANTERA_HOME` environment variable. `scripts/test_classifier.sh <library folder>` checks the classifier against an exact expected output.
 
 ## Usage
 
@@ -69,7 +69,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-t, --tandem_mask` | | Soft mask the tandem arrays of each genome, found with [FasTAN](https://github.com/thegenemyers/FASTAN), before aligning (`FastGA -M`). Much faster with genomes rich in satellites, with almost the same segments (see [Tandem masking](#tandem-masking)). The genome databases and masks are written to `tandem/` in the output folder, and kept with `-k` or `-d` |
 | `-w, --tandem_min_len` | 1000 | With `-t`, min length of the tandem arrays masked, in bp. Shorter arrays add little alignment time, but are found inside some TEs (e.g. in LTRs), whose copies masking can lose. `0` masks them all |
 | `-k, --keep_alignments` | | Keep the FastGA alignments, named after the two genomes (`<genome1>_<genome2>.1aln`). A run reuses the alignments it finds in its output folder, including ones named `pantera<n>.1aln` by earlier versions |
-| `-d, --debug` | | Keep intermediate files (all segments in `pantera_lib_0.fa`, the loop 1 output in `segments_candidates.fa`, `loop_1/`, `loop_2/`, the consensi before classification), and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
+| `-d, --debug` | | Keep intermediate files (all segments in `pantera_lib_0.fa`, the loop 1 output in `segments_candidates.fa`, `loop_1/`, `loop_2/`, the consensi before classification, the classifier's per-chunk tool outputs in `hmm_classifier/`), and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
 | `-V, --version` | | Show the version and exit |
 | `-h, --help` | | Show the options and exit |
@@ -91,6 +91,34 @@ With `-t`, `tandem/` holds the genome databases (`.1gdb`), the tandem arrays fou
 
 Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within each class (accepted and rejected elements share the numbering).
 
+## Classification
+
+Each consensus is classified by homology with the HMM classifier (`scripts/pantera_classify.R`, libraries `pantera_hmm_v1`), then checked and, for some classes, reclassified by its structure (terminal repeats, TSDs, tails, ORFs; the `reason` column of the stats says which rule decided). The classifier combines, in this order of precedence:
+
+1. protein domains: HMMs of TE protein domains (`hmmsearch --cut_ga`) on miniprot translations of curated TE proteins and on six-frame ORFs;
+2. TIR end models (DNA transposons) and end partners (ends shared with an autonomous DNA transposon of the same library or of a curated set);
+3. Helitron end models;
+4. SINE head and body models.
+
+The classifier's label (pantera classification) becomes the class written in the library through `model/label_map.tsv`, which gives RepeatMasker names (e.g. `LINE/Jockey` -> `LINE/I-Jockey`, `DIRS/DIRS` -> `LTR/DIRS`). When a sub label is reported and RepeatMasker has a name for it, the name is refined (e.g. `DNA/Tc1-Mariner` with sub label Pogo -> `DNA/TcMar-Pogo`). Without a call the class is `Unknown`. The classifier can also run alone on any library: `Rscript scripts/pantera_classify.R -i library.fa -o out -L model/hmm -T 8` (output `out/classification.tsv`).
+
+Homology columns of the stats file:
+
+| Column | Content |
+|---|---|
+| `homology_label` | Label of the classifier (pantera classification, `TYPE/subtype`), or `none` |
+| `homology_confidence` | `high`, `low`, `weak` or `none` (below) |
+| `homology_evidence` | What made the call: `protein`, `TIR` (TIR end models), `partner` (shared ends), `TIR+partner`, `Helitron` (end models), `SINE` |
+| `homology_sub` | Sub label (lineage below the subtype, e.g. Tekay, Pogo); not reported for protein sub labels whose label has a single sub-label model (`class_cfg$min_sub_models`) |
+| `homology_domains` | Domain classes of the protein call (e.g. `GAG,INT,RH,RT`; abbreviations below) |
+| `homology_alternatives` | For `weak` calls: other labels that share the only domain found |
+| `homology_flags` | Warnings: `tandem` (TRF arrays cover >= 50%), `low_complexity` (dustmasker >= 30%), `ncRNA:<families>` (Rfam hits >= 30%, or any rRNA), `host_protein:<Swiss-Prot entry>` (only with the optional host part), `chimera:<what>` (strong evidence for two TYPEs) |
+| `homology_notes` | `single_domain:<class>` for weak calls; `close_runner_up:<label>` when the call leads the next label by < 50 bits; `partner_conflict:<label>` when TIR ends and partner disagree |
+
+Confidence: `high` and `low` are the protein rule's confidence (`low`: one domain class below 100 bits, or RH, YR, CHD or HEL alone), TIR + partner of the same superfamily is `high`, TIR alone keeps its own, partner alone is `low`. `weak`: protein calls whose only domain class is shared with other TYPEs (LTR integrase, RNase H or low reverse transcriptase alone, DIRS tyrosine recombinase alone, PLE GIY-YIG alone), and Helitron-end calls; structure must confirm them. In cross-validation on curated elements, protein calls were right in 99.98% (high), 99.7% (low) and 72% (weak) of cases.
+
+Domain classes: AP aspartic protease, ATPase, CHD chromodomain, ENDO endonuclease, ENV envelope, GAG capsid, GIY GIY-YIG nuclease, HEL helicase, INT integrase, POLB DNA polymerase B, REP Rep nuclease, RH RNase H, RT reverse transcriptase, TPase DDE transposase, YR tyrosine recombinase.
+
 ## Tandem masking
 
 Long tandem arrays (satellites, centromeres) make FastGA extend huge alignments through them, and can dominate the alignment time. With `-t`, FasTAN finds the tandem arrays of each genome and those at least `-w` bp long (1 kb by default) are soft masked in the genome index, so FastGA starts no alignment inside them (alignments can still extend through them). Coordinates and sequences are unchanged: segments, alignments and annotations refer to the original genomes.
@@ -103,11 +131,11 @@ In a test with the two haplotypes of gorilla chromosome 22 (T2T, 59 Mb, 36% in t
 
 SOON?
 
-The classification model: doi:[10.5281/zenodo.22990589](https://doi.org/10.5281/zenodo.22990589)
+The HMM libraries of the classifier: <!-- TODO before 2.0.0: Zenodo DOI of pantera_hmm_v1 --> (up to 1.4.1, the XGBoost classification model: doi:[10.5281/zenodo.22990589](https://doi.org/10.5281/zenodo.22990589))
 
 ## Acknowledgements
 
-Thanks to Arian Smit and Robert Hubley (Dfam, RepeatMasker, RepeatModeler) for allowing us to use their curated peptide library in this release.
+Thanks to Arian Smit and Robert Hubley (Dfam, RepeatMasker, RepeatModeler) for allowing us to use their curated peptide library in releases up to 1.4.1.
 Thanks to Claude for helping with the development.
 
 ## Licence
