@@ -26,6 +26,8 @@
 - Removed: the rule accepting any element with TIRs within 3 bp of both ends, whatever its class (DNA and Unknown elements with TIRs are accepted by their own rules), and the rule making Unknowns with TIRs and an 8 bp TSD DNA (the next rule made every Unknown with TIRs DNA anyway).
 
 ### Fixed
+- `scripts/pantera_classify.R` no longer prints the harmless R warnings "no non-missing arguments to max/min" (for sequences whose protein hits have no lineage, and chunks with no protein hit left after filtering). The classification is unchanged.
+- `scripts/test_classifier.sh` first checks that the tools are on the `PATH` (and names the missing ones) and prints which `Rscript` it uses. When the classifier fails, it prints the last 20 lines of its log, the exit status, the command and the path of the full log, which is kept.
 - FastGA, GIXmake and FasTAN are run up to 3 times when they fail. FastGA's index step (GIXmake) sometimes crashes with a segmentation fault (seen with bioconda's FastGA 1.5.20260729, about once in a few runs of the test genomes) and stopped the whole run; run again, it works. Before a new attempt, the files left by the failed one are removed: the partial alignment, and the GDB, mask and index files FastGA had made next to the genomes (files that were there before the run are kept). Each retry is logged.
 - `-t` with no tandem array at least `-w` bp long in a genome: GIXmake could not read the empty mask and the run stopped. That genome is now indexed without a mask.
 - `-d/--debug` kept almost no intermediate files: the segments (`pantera_lib_0.fa`), the loop 1 output (`segments_candidates.fa`), `loop_1/`, `loop_2/` and the consensi were deleted at the end of every run. They are now kept with `-d`.

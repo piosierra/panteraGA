@@ -347,6 +347,7 @@ hc_prot_calls <- function(dom_file, ids) {
                   hf = as.integer(vapply(p, `[`, "", 16L)), ht = as.integer(vapply(p, `[`, "", 17L)))
   d[, ord := .I]
   d <- d[!((ht - hf + 1) / qlen < hmm_cfg$dom_min_cov & sc < hmm_cfg$dom_exempt) & sc > 0]
+  if (!nrow(d)) return(empty)
   # best score per sequence and model; the order of first appearance is kept (Python dict order)
   b <- d[, .(sc = max(sc), ord = min(ord)), by = .(e, model)][order(ord)]
   b[, full := sub(":.*", "", model)]
@@ -363,7 +364,9 @@ hc_prot_calls <- function(dom_file, ids) {
     call <- tot$lab[1]; s <- tot$s[1]
     cs <- sort(cl[lab == call]$cls, method = "radix")
     conf <- if (length(cs) == 1 && (s < hmm_cfg$low_score || cs[1] %in% hmm_cfg$host_like)) "low" else "high"
-    ln <- bx[lab == call & !is.na(lin)][, .(s = max(sc), ord = min(ord)), by = .(lin, cls)][order(ord)]
+    lb <- bx[lab == call & !is.na(lin)]                      # hits with a lineage (none for most labels)
+    ln <- if (nrow(lb)) lb[, .(s = max(sc), ord = min(ord)), by = .(lin, cls)][order(ord)] else
+      lb[0L, .(lin, cls, s = sc, ord)]
     lt <- ln[, .(s = hc_pysum(s)), by = lin]
     setorder(lt, -s, -lin)
     lin_call <- ""; ls <- ""; lm <- ""
