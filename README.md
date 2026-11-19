@@ -119,6 +119,27 @@ Confidence: `high` and `low` are the protein rule's confidence (`low`: one domai
 
 Domain classes: AP aspartic protease, ATPase, CHD chromodomain, ENDO endonuclease, ENV envelope, GAG capsid, GIY GIY-YIG nuclease, HEL helicase, INT integrase, POLB DNA polymerase B, REP Rep nuclease, RH RNase H, RT reverse transcriptase, TPase DDE transposase, YR tyrosine recombinase.
 
+## Element edges, TSDs and partners
+
+The edges of each element are where most of its copies' svfind segments start and end: svfind finds each insertion against the other genome, without its target site duplication (TSD). They are moved by at most one base to where the copies agree best on a TSD. When no copy has svfind boundaries, the edges come from the conservation of the alignment and a search for the TSD.
+
+The TSD is called from both sources. svfind sees the target of each insertion in the empty allele, so the bases of the empty allele found at both ends of the insertion are its TSD (confirmed by the copy's own flanks). The flank caller compares the bases next to the edges in every copy. When at least two copies have an svfind TSD, the element has one, of the flank caller's length if it is within the copies' range, otherwise of their median. Without svfind support, the flank caller's TSD is reported only if the copies' own flanks match better than flanks of different copies do (cross-copy null). TSDs up to 20 bp are tested.
+
+An Unknown element whose two termini are those of an element classified by homology takes that element's class: as a non-autonomous derivative (`-NA` added to the class, e.g. `DNA/TcMar-NA`) if it has the partner's edges (allowing up to 3 A, T or N bases of microsatellite target at either end) and terminal repeat at high identity, as a low-confidence call (`NA_low`) otherwise. Solo LTRs and internal deletions of LINEs take the partner's class and are rejected.
+
+TSD and partner columns of the stats file:
+
+| Column | Content |
+|---|---|
+| `TSD_length`, `TSD_confidence`, `TSD_motif`, `TSD_pvalue` | TSD length (bp, 0 = none), fraction of copies supporting it, IUPAC motif, p-value (flank caller and cross-copy null; empty for svfind lengths) |
+| `TSD_svfind` | Most frequent svfind empty-site overlap of the copies (bp) |
+| `TSD_svfind_support` | Fraction of copies with that overlap |
+| `TSD_source` | What gave the TSD: `flanks` (flank caller, within the svfind range), `svfind` (median svfind TSD), `null` (flank caller against the cross-copy null), `none` |
+| `TSD_target_tandem` | Fraction of copies inserted into a short tandem repeat (both flanks repeat with a period up to 6 bp); from 0.5 the TSD is not used to reclassify |
+| `partner` | Element of the run whose termini this one shares |
+| `partner_type` | `NA_high` (non-autonomous, `-NA` class), `NA_low` (same, low termini identity), `solo_LTR`, `internal_deletion` |
+| `partner_ident` | Identity over the partner's terminal repeat (TIR or LTR; 60 bp without one), the lower of the two termini |
+
 ## Tandem masking
 
 Long tandem arrays (satellites, centromeres) make FastGA extend huge alignments through them, and can dominate the alignment time. With `-t`, FasTAN finds the tandem arrays of each genome and those at least `-w` bp long (1 kb by default) are soft masked in the genome index, so FastGA starts no alignment inside them (alignments can still extend through them). Coordinates and sequences are unchanged: segments, alignments and annotations refer to the original genomes.
