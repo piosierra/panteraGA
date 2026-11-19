@@ -389,6 +389,35 @@ hc_prot_calls <- function(dom_file, ids) {
 
 # Protein piece of one chunk: proteins, hmmsearch, element calls. Writes prot/{proteins.faa, proteins.tsv,
 # prot.dom, prot_calls.tsv}.
+# Strand of each protein call, for orienting the element (panteraGA): the strand of the protein (ORF or miniprot
+# translation) with the highest score for the called label, summing its best domain score per domain class over
+# the hits that count for the call (as in hc_prot_calls); ties go to the protein listed first. "" without a call.
+hc_prot_strand <- function(dom_file, calls, prots) {
+  out <- rep("", nrow(calls))
+  p <- hc_fields(dom_file)
+  if (!length(p) || !nrow(prots)) return(out)
+  d <- data.table(pid = vapply(p, `[`, "", 1L), model = vapply(p, `[`, "", 4L),
+                  qlen = as.integer(vapply(p, `[`, "", 6L)), sc = as.numeric(vapply(p, `[`, "", 14L)),
+                  hf = as.integer(vapply(p, `[`, "", 16L)), ht = as.integer(vapply(p, `[`, "", 17L)))
+  d <- d[!((ht - hf + 1) / qlen < hmm_cfg$dom_min_cov & sc < hmm_cfg$dom_exempt) & sc > 0]
+  if (!nrow(d)) return(out)
+  d[, ord := .I]
+  d[, e := sub("\\|.*", "", pid)]
+  parts <- strsplit(sub(":.*", "", d$model), "/", fixed = TRUE)
+  d[, lab := vapply(parts, function(x) paste(x[seq_len(min(2L, length(x)))], collapse = "/"), "")]
+  d[, cls := sub(":.*", "", sub("^[^:]*:", "", model))]
+  d <- d[paste(e, lab) %in% paste(calls$entry, calls$call)]
+  if (!nrow(d)) return(out)
+  ps <- d[, .(s = max(sc), ord = min(ord)), by = .(e, pid, cls)][, .(s = sum(s), ord = min(ord)), by = .(e, pid)]
+  setorder(ps, e, -s, ord)
+  best <- ps[, .SD[1], by = e]
+  minus <- startsWith(prots$location, "complement") | grepl("|-", prots$prot_id, fixed = TRUE)
+  best[, strand := fifelse(minus[match(pid, prots$prot_id)], "-", "+")]
+  i <- match(calls$entry, best$e)
+  out[!is.na(i)] <- best$strand[i[!is.na(i)]]
+  out
+}
+
 hc_piece_prot <- function(ch, dir, lib) {
   o <- file.path(dir, "prot"); dir.create(o, showWarnings = FALSE)
   ids <- ch$id
@@ -429,6 +458,7 @@ hc_piece_prot <- function(ch, dir, lib) {
                  "--domZ", hmm_cfg$hmm_z, "--cut_ga", shQuote(lib$prot_hmm), shQuote(faa)))
   } else file.create(dom)
   calls <- hc_prot_calls(dom, ids)
+  calls[, strand := hc_prot_strand(dom, calls, prots)]
   hc_write(calls, file.path(o, "prot_calls.tsv"))
   calls
 }

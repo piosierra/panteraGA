@@ -127,6 +127,8 @@ The TSD is called from both sources. svfind sees the target of each insertion in
 
 An Unknown element whose two termini are those of an element classified by homology takes that element's class: as a non-autonomous derivative (`-NA` added to the class, e.g. `DNA/TcMar-NA`) if it has the partner's edges (allowing up to 3 A, T or N bases of microsatellite target at either end) and terminal repeat at high identity, as a low-confidence call (`NA_low`) otherwise. Solo LTRs and internal deletions of LINEs take the partner's class and are rejected.
 
+Elements are oriented by the strand of their protein call; without one, as the longer element (with a protein call) whose 3' end they match, if any (solo LTRs, 5'-truncated LINE copies); otherwise by their longest ORF. The stats column `orientation` says which: `protein`, `container` (turned to the longer element's strand) or `ORF` (including fragments already on their container's strand).
+
 TSD and partner columns of the stats file:
 
 | Column | Content |

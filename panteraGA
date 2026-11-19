@@ -2122,6 +2122,44 @@ na_partner_calls <- function(hits, el, unk, partners) {
   pr[, .(wid = u, partner = p, partner_class = pcls, partner_type = ptype, partner_ident = ident)]
 }
 
+## Orientation of elements without a protein call that are 3' fragments of a longer element (stats_tes): an
+## element whose single BLAST hit to a longer one covers rules_cfg$anchor_cover of it at rules_cfg$anchor_ident or
+## more, ending within rules_cfg$anchor_end bp of the longer one's 3' end, is turned to the longer one's strand
+## (the longest such container). Solo LTRs and 5'-truncated LINE copies have short or no ORFs, so the longest ORF
+## orients them at random: in five D. melanogaster genomes, 7 such elements were reversed relative to RepBase
+## (6 solo LTRs and a Jockey 3' end called SINE), and their containers had the RepBase strand. The container must
+## be oriented by its protein call: oriented by its longest ORF, it is itself on a random strand (in human HG002, an
+## AluY was turned by a longer Alu consensus). tes: name, seq (already oriented), lente, orientation, flipped.
+## Returns tes with seq, orientation and flipped updated. One all-against-all BLAST, with the settings of the
+## structure BLAST in stats_tes.
+
+orient_by_container <- function(tes, temp) {
+  cand <- tes$orientation != "protein"
+  if (!any(cand)) return(tes)
+  f <- file.path(temp, "tmp-orient")
+  wfasta(tes[, .(paste0(">", sub("^>", "", gsub("#.*", "", name))), seq)], f)
+  system(paste0("makeblastdb -in ", shQuote(f), " -dbtype nucl 1> /dev/null"))
+  h <- fread(cmd = paste0("blastn -query ", shQuote(f), " -db ", shQuote(f), " -task blastn -num_threads ",
+                          opt$threads, " -mt_mode 1",
+                          " -evalue 500 -outfmt 6 -word_size 11 -gapopen 4 -gapextend 1 -reward 1 -penalty -1"),
+             header = FALSE)
+  unlink(paste0(f, c("", ".nhr", ".nin", ".nsq", ".ndb", ".not", ".ntf", ".nto", ".njs")))
+  if (nrow(h) == 0) return(tes)
+  setnames(h, c("q", "s", "pident", "length", "mismatch", "gapopen", "qstart", "qend", "sstart", "send", "evalue",
+                "bitscore"))
+  wid <- sub("^>", "", gsub("#.*", "", tes$name))
+  h[, `:=`(lq = tes$lente[match(q, wid)], ls = tes$lente[match(s, wid)])]
+  h <- h[q != s & q %in% wid[cand] & s %in% wid[!cand] & lq < ls & length / lq >= rules_cfg$anchor_cover &
+           pident >= rules_cfg$anchor_ident & pmax(sstart, send) >= ls - rules_cfg$anchor_end]
+  if (nrow(h) == 0) return(tes)
+  h <- h[order(q, -ls, -bitscore)][, .SD[1], by = q][sstart > send]   # longest container; reversed against it
+  if (nrow(h) == 0) return(tes)
+  i <- match(h$q, wid)
+  tes[i, `:=`(seq = rc(seq), flipped = !flipped, orientation = "container")]
+  lx(paste("Elements turned to the strand of a longer element whose 3' end they match:", length(i)))
+  tes
+}
+
 # Copies per genome of a cluster, as "#genome1---n1---genome2---n2#"
 gen_counts <- function(names) {
   gc <- table(gsub(">", "", gsub("#.*", "", names)))
@@ -2363,8 +2401,17 @@ classify_tes <- function() {
   hc <- hmm_classify(file, outf("hmm_classifier"), hmm_libdir(), threads = opt$threads, keep = opt$debug)
   hom <- hom_columns(hc, fread(file.path(pantera_code, "model", "label_map.tsv"), sep = "\t", quote = "",
                                colClasses = "character", na.strings = NULL))
+  # Strand of the protein call (prot_calls.tsv of the classifier), used to orient the element (stats_tes)
+  pc <- fread(file.path(outf("hmm_classifier"), "prot_calls.tsv"), sep = "\t", colClasses = "character",
+              na.strings = NULL, quote = "")
+  hom[, prot_strand := ""]
+  if ("strand" %in% names(pc)) {
+    ps <- pc$strand[match(hc$id, pc$entry)]
+    prot <- startsWith(hc$evidence, "protein") & !is.na(ps)
+    hom[match(hc$input_id[prot], input_id), prot_strand := ps[prot]]
+  }
   final[, input_id := sub("^>", "", name)]
-  hcols <- c(names(hom_stats), "Prediction")
+  hcols <- c(names(hom_stats), "Prediction", "prot_strand")
   final[hom, on = "input_id", (hcols) := mget(paste0("i.", hcols))]   # update join: keeps the order of final
   final[, input_id := NULL]
   final[is.na(Prediction), `:=`(Prediction = "Unknown", hom_label = "none", hom_confidence = "none")]
@@ -2374,7 +2421,7 @@ classify_tes <- function() {
   final[, name := paste0(name, "#", Prediction)]
   fwrite(final, paste0(file, ".statspre"), sep = "\t")
   return(final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t",
-                   "gencount", "aln_file",
+                   "gencount", "aln_file", "prot_strand",
                    names(hom_stats)), with = FALSE])
 }
 
@@ -2413,7 +2460,7 @@ hom_columns <- function(hc, lmap) {
 stats_tes <- function(final, genomes) {
   lx("Stats start")
   tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t",
-                   "gencount", "aln_file",
+                   "gencount", "aln_file", "prot_strand",
                    names(hom_stats)), with = FALSE]
   # Classes from homology, before any structure rule: partners are the elements classified here (na_partner_calls)
   cls0 <- data.table(wid = gsub("^>", "", gsub("#.*", "", tes$name)), cls = gsub(".*#", "", tes$name))
@@ -2426,10 +2473,21 @@ stats_tes <- function(final, genomes) {
   check_tasks(orfs_res, "ORF search", tes$name)
   orfs_tes <- rbindlist(orfs_res)
   tes <- cbind(tes, orfs_tes)
-  lx(paste("Flipping", nrow(tes[strand == "-"]), "sequences"))
+  ## Orientation (stats: orientation). By the strand of the protein call when there is one, otherwise by the
+  ## longest ORF. The longest ATG-to-stop ORF can be on the other strand from the protein: in 999 VGP consensi of
+  ## aPleWal, 19 of 758 protein calls (14 PIF-Harbinger of 13.5-14.8 kb whose 340-aa transposase is shorter than an
+  ## ORF on the other strand, an RTE whose 528-aa RT is not in its longest ORF).
+  tes[, orientation := "ORF"]
+  tes[prot_strand %in% c("+", "-") & prot_strand != strand, n_prot_flip := TRUE]
+  lx(paste("Elements oriented by their protein call:", sum(tes$prot_strand %in% c("+", "-")),
+           "; on the other strand from their longest ORF:", sum(tes$n_prot_flip %in% TRUE)))
+  tes[prot_strand %in% c("+", "-"), `:=`(strand = prot_strand, orientation = "protein")]
+  tes[, n_prot_flip := NULL]
   tes[, flipped := strand == "-"]
   tes[strand == "-", seq := rc(seq)]
   tes$strand <- NULL
+  tes <- orient_by_container(tes, temp)
+  lx(paste("Flipping", sum(tes$flipped), "sequences"))
   
   ## 3' tails: polyA or a short tandem repeat (see detect_tail). Checked at both ends:
   ## elements are oriented by their longest ORF, so for LINEs the 3' end is the right
@@ -2763,7 +2821,7 @@ stats_tes <- function(final, genomes) {
   stats_data <- tes[, c("name", "lente", "pass", "reason", names(hom_stats), "cluster", "tsd_l", "tsd_c", "tsd_m",
                         "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t", "gencount", "type", "length", "lgap", "rgap", "pa",
                         "tail3_motif", "tail3_len",
-                        "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of",
+                        "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of", "orientation",
                         "partner", "partner_type", "partner_ident",
                         "orf1", "orf2", "orf3", "maxRep", "Ns"), with = FALSE]
   ### Last fixes
@@ -2775,7 +2833,7 @@ stats_tes <- function(final, genomes) {
                             "TSD_svfind", "TSD_svfind_support", "TSD_source", "TSD_target_tandem", "gen_count",
                             "struct_type", "struct_len", "left_gap",
                             "right_gap", "polyA", "tail3_motif", "tail3_len", "tail5_motif", "tail5_len",
-                            "tr3_relatives", "fragment_of", "partner", "partner_type", "partner_ident",
+                            "tr3_relatives", "fragment_of", "orientation", "partner", "partner_type", "partner_ident",
                             "orf1", "orf2", "orf3", "maxTR", "Ns")
   
   stats_data <- cbind(stats_data, gtab)
