@@ -140,7 +140,6 @@ rules_cfg <- list(
   tandem_frac = 2.5,      # maxTR > length / tandem_frac: element mostly a repeat of itself;
   tandem_ltr_max = 100,   #   rejected if it is a LINE, or has an LTR structure and maxTR > this
   line_min_orf = 1600,    # min longest ORF for a LINE
-  line_max_pa = 10,       # LINE: max distance of a polyA from an end
   line_inner_gap = 10,    # LINE: also passes if its self-match is more than this from both ends
   dup_cover = 0.98,       # duplicates: min coverage of the shorter element,
   dup_ident = 98,         #   min identity (%),
@@ -161,9 +160,7 @@ rules_cfg <- list(
   ltr_tsd_max = 6,
   tgca_tsd_conf = 0.8,    # Unknown with TG..CA ends: min TSD confidence to become LTR
   unknown_tsd_conf = 0.3, # Unknown with an LTR: min TSD confidence to become LTR
-  unknown_ltr_min_len = 150, # Unknown: min LTR length to become LTR
-  sine_reco_max_len = 400,# Unknown: becomes SINE if shorter than this
-  sine_reco_max_pa = 5    #   and with a polyA within this many bp of an end
+  unknown_ltr_min_len = 150 # Unknown: min LTR length to become LTR
 )
 
 # Partners by shared termini (stats_tes, na_partner_calls): an Unknown element whose two termini are those of
@@ -237,7 +234,7 @@ read_pars <- function() {
       "min_copies",     "e", 1, "integer",   "Min copies in at least one genome for an element to be accepted [2]",
       "max_ns",         "n", 1, "double",    "Max fraction of Ns in a segment [0.001]",
       "max_cons_ns",    "c", 1, "double",    "Max fraction of Ns in a final consensus [0.02]",
-      "min_polya",      "p", 1, "integer",   "Min length of a polyA tail [10]",
+      "min_polya",      "p", 1, "integer",   "Min length of a 3' tail (polyA or short tandem repeat) [10]",
       "flanking",       "f", 1, "integer",   "Min length of the flanks of a segment [automatic, see -q]",
       "flank_quantile", "q", 1, "double",    "Without -f: fraction of segments with the shortest flanks to discard [0.05]",
       "anno_coverage",  "a", 1, "double",    "Min fraction of an element covered by a hit, for annotation [0.80]",
@@ -2489,11 +2486,11 @@ stats_tes <- function(final, genomes) {
   tes <- orient_by_container(tes, temp)
   lx(paste("Flipping", sum(tes$flipped), "sequences"))
   
-  ## 3' tails: polyA or a short tandem repeat (see detect_tail). Checked at both ends:
-  ## elements are oriented by their longest ORF, so for LINEs the 3' end is the right
-  ## end, but SINEs have no ORF and can end up either way round.
-  t3 <- rbindlist(lapply(tes$seq, detect_tail))
-  t5 <- rbindlist(lapply(tes$seq, function(s) detect_tail(rc(s))))
+  ## 3' tails: polyA or a short tandem repeat of at least -p bp (see detect_tail). Checked at both ends: LINEs
+  ## are oriented by their protein (or ORF), so their 3' end is the right end, but SINEs have no ORF and can end
+  ## up either way round (they are turned so that the tail is 3', below).
+  t3 <- rbindlist(lapply(tes$seq, detect_tail, min_len = opt$min_polya))
+  t5 <- rbindlist(lapply(tes$seq, function(s) detect_tail(rc(s), min_len = opt$min_polya)))
   tes[, `:=`(tail3_motif = t3$tail_motif, tail3_len = t3$tail_len,
              tail5_motif = t5$tail_motif, tail5_len = t5$tail_len)]
   wfasta(tes[, c("name", "seq")], tmp_tes)
@@ -2545,13 +2542,11 @@ stats_tes <- function(final, genomes) {
     tes <- merge(tes, te_data_rep, by.x = "name", by.y = "qseqid", all.x = T)
     tes_count <- nrow(tes)
     
-    tes$pas <- unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$min_polya), "|", strrep("T", opt$min_polya))), function(x) {min(unlist(x)) - 1}))
-    tes$eas <- nchar(tes$seq) - unlist(lapply(stri_locate_all_regex(tes$seq, paste0(strrep("A", opt$min_polya), "|", strrep("T", opt$min_polya))), function(x) {max(unlist(x))}))
-    tes[, pa := min(pas, eas), by = .I]
-    tes[substr(seq, 1, 5) == "AAAAA" | substr(seq, 1, 5) == "TTTTT" | substr(seq, lente - 4, lente) == "AAAAA" | substr(seq, lente - 4, lente) == "TTTTT", pa := 0, by = .I]
     
+    # LINEs: a long ORF and a tail at the 3' end (detect_tail), or no terminal structure, or a self-match away
+    # from both ends. (Was: a polyA of -p bp anywhere within 10 bp of either end, or a tail at the 3' end.)
     good_line <- tes[grepl("LINE", name) & orf1 > rules_cfg$line_min_orf &
-                       (pa < rules_cfg$line_max_pa | tail3_len > 0 | is.na(type) |
+                       (tail3_len > 0 | is.na(type) |
                           (lgap > rules_cfg$line_inner_gap & rgap > rules_cfg$line_inner_gap))]$name
     
     # Find elements which share TIR or LTR to good ones.
@@ -2582,9 +2577,13 @@ stats_tes <- function(final, genomes) {
     ## end of the longer (container) element is its right end; the shorter one can be in
     ## either orientation, since its own longest ORF may be on the other strand. The
     ## container gets the number of such relatives, each relative the container's id.
+    ## The 3' end is measured from the start of the container's 3' tail: copies of one family differ in tail
+    ## length, so a fragment with a shorter polyA than its container's ends further from the container's last base.
+    t3c <- tes$tail3_len[match(te_data_mix$sseqid, gsub(">", "", tes$name))]
+    t3c[is.na(t3c)] <- 0
     anch <- te_data_mix[lente.x < lente.y & length / lente.x >= rules_cfg$anchor_cover &
                           pident >= rules_cfg$anchor_ident &
-                          pmax(sstart, send) >= lente.y - rules_cfg$anchor_end]
+                          pmax(sstart, send) >= lente.y - t3c - rules_cfg$anchor_end]
     tes[, `:=`(tr3_relatives = 0L, fragment_of = NA_character_)]
     if (nrow(anch) > 0) {
       rel <- anch[, .(n = uniqueN(qseqid)), by = sseqid]
@@ -2715,7 +2714,6 @@ stats_tes <- function(final, genomes) {
     lx(paste("Unknown recovery cutpoint:", ucut))
     tes[grepl("#Unknown", name) & cluster > max(rules_cfg$unknown_min_cluster, ucut), `:=`(pass = T, reason = "Unknown: large cluster")]
     # This should go at the end of the filters
-    tes[is.na(pa), pa := 100]
     tes[, TR2 := maxRep > lente / rules_cfg$tandem_frac]
     tes[is.na(TR2), TR2 := F]
     tes[TR2 == T & type == "LTR" & maxRep > rules_cfg$tandem_ltr_max, `:=`(pass = F, reason = "LTR structure, mostly tandem repeat")]
@@ -2736,9 +2734,8 @@ stats_tes <- function(final, genomes) {
         length > rules_cfg$unknown_ltr_min_len &
         lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
         reason = "Unknown to LTR: terminal LTRs and TSD"), by = .I]
-    # SINE reclassification by pA and size. TO UPDATE WITH HOMOLOGY SEARCH
-    tes[grepl("#Unknown", name) & lente < rules_cfg$sine_reco_max_len & pa < rules_cfg$sine_reco_max_pa & !is.na(pa), `:=`(name = paste0(gsub("#.*", "", name), "#SINE"), pass = T,
-        reason = "Unknown to SINE: short, with polyA"), by = .I]
+    # No reclassification of Unknowns as SINE by structure: SINEs come from the classifier's SINE models only
+    # (removed: Unknown shorter than 400 bp with a polyA within 5 bp of an end).
     # Partner calls: non-autonomous derivatives take the partner's class with "-NA" and pass; with low termini
     # identity they take it too but are accepted or rejected by the rules above; solo LTRs and internal
     # deletions of LINEs take the partner's class and are rejected. "{partner}" becomes the partner's final name.
@@ -2755,6 +2752,16 @@ stats_tes <- function(final, genomes) {
     na_n <- table(na_calls$partner_type)
     lx(paste("Partner calls by shared termini:", if (length(na_n)) paste(names(na_n), na_n, collapse = ", ") else "none"))
     tes[, wid := NULL]
+    # SINEs with a tail only at the 5' end are turned so that it is 3' (orientation "tail"), unless oriented by a
+    # protein call. Their tails, gaps and alignment follow.
+    ft <- tes[, which(startsWith(gsub(".*#", "", name), "SINE") & orientation != "protein" & tail5_len > 0 &
+                        tail3_len == 0)]
+    if (length(ft) > 0) {
+      tes[ft, `:=`(seq = rc(seq), flipped = !flipped, orientation = "tail",
+                   tail3_motif = tail5_motif, tail3_len = tail5_len, tail5_motif = tail3_motif, tail5_len = tail3_len,
+                   lgap = rgap, rgap = lgap)]
+    }
+    lx(paste("SINEs turned so that their tail is 3':", length(ft)))
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
     tes[Ns > (nchar(seq) * opt$max_cons_ns), `:=`(pass = F, reason = "too many Ns")]
     tes[grepl("#LINE", name) & TR2 == T, `:=`(pass = F, reason = "LINE, mostly a repeat of itself (maxTR)")]
@@ -2770,9 +2777,48 @@ stats_tes <- function(final, genomes) {
   unlink(temp, recursive = TRUE)
   tes <- tes[order(-lente)]
   
+  tes[, work_id := gsub("#.*", "", name)]
+  gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, genomes)}))
+  gmax <- apply(gtab, 1, max)
+  tes[gmax < opt$min_copies, `:=`(pass = F, reason = "too few copies in every genome (-e)")]
+  ## Contained elements: an element covered over most of its length, at high identity, by one hit of a longer
+  ## accepted LINE, LTR, PLE or RC element is redundant: it takes the container's class and is rejected ("contained
+  ## in"), whether it was accepted or not ("no rule accepts it"); other reasons for rejection (Ns, copies, tandem)
+  ## are kept, with the container's class. An Unknown at the homology step that is a 3' fragment of an accepted
+  ## LINE or PLE (fragment_of: rules_cfg$anchor_cover at rules_cfg$anchor_ident, ending at its 3' end) counts as
+  ## contained too: human L1 3' ends below the containment identity were accepted as "Unknown: large cluster".
+  ## This is the last decision, so no rule can accept it again. Containers are taken from the longest down; an
+  ## element rejected here contains no others.
+  tes[, container := NA_character_]
+  if (exists("anch", inherits = FALSE) && nrow(anch) > 0) {
+    fp <- anch[gsub("#.*", "", qseqid) %in% cls0[cls == "Unknown"]$wid &
+                 gsub("/.*", "", gsub(".*#", "", sseqid)) %in% c("LINE", "PLE"),
+               .(small = gsub("#.*", "", qseqid), big = gsub("#.*", "", sseqid))]
+    contain_pairs <- unique(rbind(contain_pairs, fp))
+  }
+  if (nrow(contain_pairs) > 0) {
+    top_cls <- gsub("/.*", "", gsub(".*#", "", tes$name))
+    n_contained <- 0
+    for (b in tes$work_id[tes$pass & top_cls %in% rules_cfg$contain_classes]) {   # tes is sorted by length
+      bi <- which(tes$work_id == b)
+      if (!tes$pass[bi]) next
+      inside <- which(tes$work_id %in% contain_pairs[big == b]$small & is.na(tes$container) &
+                        (tes$pass | tes$reason == "no rule accepts it"))
+      inside <- setdiff(inside, bi)
+      if (length(inside) > 0) {
+        tes[inside, `:=`(pass = F, reason = "contained in {container}", container = b,
+                         name = paste0(work_id, "#", gsub(".*#", "", tes$name[bi])))]
+        n_contained <- n_contained + length(inside)
+      }
+      # rejected for another reason: the container's class, the reason kept
+      other <- which(tes$work_id %in% contain_pairs[big == b]$small & is.na(tes$container) & !tes$pass)
+      if (length(other) > 0) tes[other, `:=`(container = b, name = paste0(work_id, "#", gsub(".*#", "", tes$name[bi])))]
+    }
+    lx(paste("Elements rejected as contained in a longer accepted LINE, LTR, PLE or RC element:", n_contained))
+  }
+
   ### Final names, built from the final class and numbered by length within each class:
   ### <class>_<n>-<lib>#<class/subclass>. Alignments are renamed to match.
-  tes[, work_id := gsub("#.*", "", name)]
   tes[, cls := gsub(".*#", "", name)]
   tes[, short_cls := gsub(".*/", "", cls)]
   tes[, ix := seq_len(.N), by = short_cls]
@@ -2782,6 +2828,8 @@ stats_tes <- function(final, genomes) {
                                               partner_ident = NA_real_)]
   tes[, partner := name[match(partner, work_id)]]           # partner id -> final name
   tes[!is.na(partner), reason := stri_replace_all_fixed(reason, "{partner}", partner)]
+  tes[, container := name[match(container, work_id)]]       # container id -> final name
+  tes[!is.na(container), reason := stri_replace_all_fixed(reason, "{container}", container)]
   for (k in seq_len(nrow(tes))) {
     old_aln <- outf("alignments", tes$aln_file[k])
     if (file.exists(old_aln)) {
@@ -2792,32 +2840,12 @@ stats_tes <- function(final, genomes) {
   }
   tes[, name := paste0(">", name)]
   
-  gtab <- rbindlist(lapply(tes$gencount, function(x) {getgenomes(x, genomes)}))
-  gmax <- apply(gtab, 1, max)
-  tes[gmax < opt$min_copies, `:=`(pass = F, reason = "too few copies in every genome (-e)")]
-  ## Contained elements: an element covered over most of its length, at high identity,
-  ## by one hit of a longer accepted LINE, LTR, PLE or RC element is redundant and is
-  ## rejected. This is the last decision, so no rule can accept it again. Containers
-  ## are taken from the longest down; an element rejected here rejects no others.
-  if (nrow(contain_pairs) > 0) {
-    top_cls <- gsub("/.*", "", gsub(".*#", "", tes$name))
-    n_contained <- 0
-    for (b in tes$work_id[tes$pass & top_cls %in% rules_cfg$contain_classes]) {   # tes is sorted by length
-      bi <- which(tes$work_id == b)
-      if (!tes$pass[bi]) next
-      inside <- which(tes$work_id %in% contain_pairs[big == b]$small & tes$pass)
-      if (length(inside) > 0) {
-        tes[inside, `:=`(pass = F, reason = paste("contained in", sub("^>", "", tes$name[bi])))]
-        n_contained <- n_contained + length(inside)
-      }
-    }
-    lx(paste("Elements rejected as contained in a longer accepted LINE, LTR, PLE or RC element:", n_contained))
-  }
   lx(paste("Elements accepted:", nrow(tes[pass == TRUE]), "; rejected:", nrow(tes[pass == FALSE])))
   # The library holds the accepted elements; the rejected ones go to their own file
   # (their reasons are in the stats file, which lists both)
   wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
   wfasta(tes[pass == F, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-rejected.fa")))
+  tes[, pa := tail3_motif %in% "A" | tail5_motif %in% "A"]   # stats polyA: an A tail (detect_tail) at an end
   stats_data <- tes[, c("name", "lente", "pass", "reason", names(hom_stats), "cluster", "tsd_l", "tsd_c", "tsd_m",
                         "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t", "gencount", "type", "length", "lgap", "rgap", "pa",
                         "tail3_motif", "tail3_len",
@@ -2826,7 +2854,6 @@ stats_tes <- function(final, genomes) {
                         "orf1", "orf2", "orf3", "maxRep", "Ns"), with = FALSE]
   ### Last fixes
   stats_data[(tsd_m == "" | is.na(tsd_m)) & tsd_s != "svfind", tsd_c := 0]   # svfind TSDs can lack a motif
-  stats_data$pa <- stats_data$pa < opt$min_polya
   
   colnames(stats_data) <- c("name", "TE_len", "pass", "reason", unname(hom_stats), "cluster_size",
                             "TSD_length", "TSD_confidence", "TSD_motif", "TSD_pvalue",

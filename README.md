@@ -59,7 +59,7 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-e, --min_copies` | 2 | Min copies in at least one genome for an element to be accepted |
 | `-n, --max_ns` | 0.001 | Max fraction of Ns in a segment |
 | `-c, --max_cons_ns` | 0.02 | Max fraction of Ns in a final consensus |
-| `-p, --min_polya` | 10 | Min length of a polyA tail |
+| `-p, --min_polya` | 10 | Min length of a 3' tail (polyA or short tandem repeat, unit 1-6 bp) |
 | `-f, --flanking` | automatic | Min length of the flanks of a segment. If not given, the fraction `-q` of segments with the shortest flanks is discarded instead |
 | `-q, --flank_quantile` | 0.05 | Without `-f`: fraction of segments with the shortest flanks to discard |
 | `-a, --anno_coverage` | 0.80 | Min fraction of an element covered by a hit, for genome annotation |
@@ -127,7 +127,9 @@ The TSD is called from both sources. svfind sees the target of each insertion in
 
 An Unknown element whose two termini are those of an element classified by homology takes that element's class: as a non-autonomous derivative (`-NA` added to the class, e.g. `DNA/TcMar-NA`) if it has the partner's edges (allowing up to 3 A, T or N bases of microsatellite target at either end) and terminal repeat at high identity, as a low-confidence call (`NA_low`) otherwise. Solo LTRs and internal deletions of LINEs take the partner's class and are rejected.
 
-Elements are oriented by the strand of their protein call; without one, as the longer element (with a protein call) whose 3' end they match, if any (solo LTRs, 5'-truncated LINE copies); otherwise by their longest ORF. The stats column `orientation` says which: `protein`, `container` (turned to the longer element's strand) or `ORF` (including fragments already on their container's strand).
+Elements are oriented by the strand of their protein call; without one, as the longer element (with a protein call) whose 3' end they match, if any (solo LTRs, 5'-truncated LINE copies); otherwise by their longest ORF. The stats column `orientation` says which: `protein`, `container` (turned to the longer element's strand), `tail` (a SINE turned so that its tail is 3') or `ORF` (including fragments already on their container's strand).
+
+Tails (stats `tail3_motif`, `tail3_len`, `tail5_motif`, `tail5_len`; `polyA` is TRUE when either is an A tail) are short tandem repeats (unit 1-6 bp, polyA = unit 1) of at least `-p` bp ending within 10 bp of an end. A LINE needs a long ORF and a tail at its 3' end (or no terminal repeat). SINEs come only from the classifier's SINE models; a SINE with its tail only at the 5' end is turned (`orientation` `tail`). Elements contained in a longer accepted LINE, LTR, PLE or RC element (one hit over 98% of the element at 98% identity, tails excluded), and Unknowns that are 3' fragments of an accepted LINE or PLE (90% at 90%), take the container's class and are rejected ("contained in").
 
 TSD and partner columns of the stats file:
 
