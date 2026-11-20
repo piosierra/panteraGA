@@ -2764,6 +2764,14 @@ stats_tes <- function(final, genomes) {
     lx(paste("SINEs turned so that their tail is 3':", length(ft)))
     tes$Ns <- nchar(tes$seq) - nchar(gsub("N", "", tes$seq))
     tes[Ns > (nchar(seq) * opt$max_cons_ns), `:=`(pass = F, reason = "too many Ns")]
+    # Microsatellites: no homology call, and the classifier flags the element both tandem (TRF arrays >= 50%) and
+    # low_complexity (dustmasker >= 30%). Class Simple_repeat, rejected (RepeatMasker masks simple repeats itself).
+    # In E. cirrhosa, 40 accepted elements of 32-334 bp were (TA)n, (CA)n, (AG)n... arrays: 13 as DNA (the
+    # self-complementary (TA)n looks like a TIR) and 27 as "Unknown: large cluster".
+    micro <- tes[, hom_confidence %in% c("none", "") & grepl("tandem", hom_flags, fixed = TRUE) &
+                   grepl("low_complexity", hom_flags, fixed = TRUE)]
+    tes[micro, `:=`(name = paste0(gsub("#.*", "", name), "#Simple_repeat"), pass = F, reason = "microsatellite")]
+    lx(paste("Elements rejected as microsatellites:", sum(micro)))
     tes[grepl("#LINE", name) & TR2 == T, `:=`(pass = F, reason = "LINE, mostly a repeat of itself (maxTR)")]
     
   } else {

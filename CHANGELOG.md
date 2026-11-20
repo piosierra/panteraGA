@@ -10,6 +10,9 @@
 - `-d` also keeps the classifier's per-chunk files (`hmm_classifier/`).
 - `scripts/run_dev.sh` uses the clone's `model/hmm/` when it is there.
 
+### Changed (microsatellites)
+- Elements with no homology call that the classifier flags both `tandem` (TRF arrays cover >= 50%) and `low_complexity` (dustmasker covers >= 30%) are microsatellite arrays: class `Simple_repeat`, rejected (reason "microsatellite"). RepeatMasker masks simple repeats itself. Results, same alignments as 016e067: test and D. melanogaster unchanged (stats identical); HG002: 2 rejected Unknowns (79 and 95 bp, (AT)n and (CTTT)n) become Simple_repeat, accepted 18 -> 18; E. cirrhosa: accepted 169 -> 129, 42 Simple_repeat: 13 (TA)n of 51-334 bp accepted as DNA by their "TIRs" (the self-complementary repeat), 27 accepted as "Unknown: large cluster" ((TA)n, (CA)n, (AG)n, (AAG)n...), 2 already rejected. The `AGACATAG` family elements, flagged `tandem` but not `low_complexity`, are kept.
+
 ### Changed (tails, SINEs and contained elements)
 - Tails: the 3' tail detector (`detect_tail`: polyA or a short tandem repeat, unit 1-6 bp, ending within 10 bp of an end) replaces the old polyA test (a run of `-p` A or T anywhere within 10 bp of either end) in the rules, and its minimum length is now `-p` (default 10; was fixed at 12). Stats column `polyA` is now TRUE when the tail at either end is an A tail.
 - LINEs need a long ORF and a tail at the 3' end, or no terminal repeat, or a self-match away from both ends (`rules_cfg$line_max_pa` removed). With the orientation by protein call, the 3' end of a LINE is its right end.
