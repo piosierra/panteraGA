@@ -77,6 +77,15 @@ loop2_cfg <- list(
                           #   the cluster reaches the flanks (most likely a segmental duplication)
 )
 
+# Orthologous copies (loop 2, copy_loci): copies from different genomes that share both flanks next to the
+# insertion are one insertion (one locus) found in several genomes; one copy per locus is aligned.
+locus_cfg <- list(
+  flank = 60,             # flank bases next to the insertion compared, each side
+  k = 16,                 # shared k-mers of this length, starting every `step` bases of the flank
+  step = 4,
+  min_letters = 3         # k-mers with fewer distinct bases (microsatellites, (TA)n targets) are ignored
+)
+
 # Consensus edges: extending a conserved block across gaps
 edges_cfg <- list(
   small_gap = 20,         # gaps up to this many columns are always bridged
@@ -155,7 +164,7 @@ rules_cfg <- list(
   dirs_min_orf = 2000,    # DIRS: min longest ORF
   dirs_max_len = 10000,   #   and max length
   sine_max_len = 500,     # SINE: max length to pass
-  unknown_min_cluster = 5,# Unknown: passes with a cluster larger than this (or the kneedle cut)
+  unknown_min_loci = 5,   # Unknown: passes when found at more loci than this (copies of one insertion count once)
   ltr_tsd_min = 4,        # LTR TSD length range, for reclassifying Unknowns as LTR
   ltr_tsd_max = 6,
   tgca_tsd_conf = 0.8,    # Unknown with TG..CA ends: min TSD confidence to become LTR
@@ -206,7 +215,7 @@ lx <- function(x) {
 # Loads the required libraries. They are installed as dependencies by conda.
 get_libs <- function() {
   pkgs <- c("getopt", "parallel", "Biostrings", "stringi",
-            "ape", "quantmod", "data.table")
+            "ape", "data.table")
   for (p in pkgs) {
     if (!suppressPackageStartupMessages(require(p, character.only = TRUE,
                                                 quietly = TRUE))) {
@@ -438,62 +447,6 @@ rc_alignment <- function(f) {
   wfasta(a, f)
 }
 
-## Original code from: https://github.com/etam4260/kneedle/blob/main/R/kneedle.R
-kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
-  data <- matrix(unlist(list(x, y)), ncol = 2)
-  data <- data[order(data[,1], decreasing = FALSE), ]
-  if(missing(decreasing)) {
-    if( (data[(nrow(data)), 2] - data[1, 2]) >= 0 ) {
-      decreasing = FALSE
-    } else {
-      decreasing = TRUE
-    }
-  }
-  if(missing(concave)) {
-    secondderiv <- diff(diff(data[, 2]) / diff(data[, 1]))
-    if(mean(secondderiv) > 0) {
-      concave = TRUE
-    } else {
-      concave = FALSE
-    }
-  }
-  maxy <- max(y)
-  miny <- min(y)
-  maxx <- max(x)
-  minx <- min(x)
-  data[ ,1] <- (data[, 1]- min(data[, 1]))/(max(data[ ,1])- min(data[, 1]))
-  data[ ,2] <- (data[, 2]- min(data[, 2]))/(max(data[ ,2])- min(data[, 2]))
-  if(concave && !decreasing) {
-    differ <- abs(c(data[ ,2] - data[ ,1]))
-  } else if(concave && decreasing) {
-    differ <- abs(c(data[ ,2] - (1 - data[ ,1])))
-  } else if(!concave && !decreasing) {
-    differ <- abs(c(data[ ,2] - data[ ,1]))
-  } else if(!concave && decreasing) {
-    differ <- abs(c(data[ ,2] - (1 - data[ ,1])))
-  }
-  peak.indices <- findPeaks(differ) - 1
-  data <- cbind(data, differ)
-  diffx = diff(data[, 1])
-  T.lm.x.s <- sensitivity * mean(diffx)
-  knee = NULL
-  for(i in 1:length(peak.indices)) {
-    T <- data[peak.indices[i] ,3] - (T.lm.x.s)
-    y.value <- data[peak.indices[i] ,3]
-    for(j in (peak.indices[i]):if(i+1 < length(peak.indices)) peak.indices[i+1] else length(differ)) {
-      if(differ[j] < T) {
-        knee = peak.indices[i];
-        break;
-      }
-    }
-    if(!is.null(knee)) {
-      break;
-    }
-  }
-  x <- ((maxx - minx) * (data[knee, 1])) + minx
-  y <- ((maxy - miny) * (data[knee, 2])) + miny
-  return(c(as.numeric(x),as.numeric(y)))
-}
 
 # Reads the two ONEcode files extracted from each 1aln file with svfind.
 # genomes: genome file names (without folders), in the order of the alignments.
@@ -2166,6 +2119,53 @@ gen_counts <- function(names) {
   paste0("#", paste0(c(rbind(names(gc), gc)), collapse = "---"), "#")
 }
 
+# Locus of each copy of a loop 2 cluster: copies from different genomes whose flanks next to the insertion
+# (locus_cfg$flank bases each side, svfind flank lengths) share k-mers on both sides, in the same or in opposite
+# orientation (cd-hit clusters both strands), are the same insertion. Returns one integer per copy, the index of
+# the first copy of its locus. Shared k-mers are found with one join on canonical k-mers, so the cost grows with
+# the number of copies, not with its square. In five D. melanogaster strains, 5 of the 16 copies of the I element
+# were one insertion: their conserved flanks failed the segmental-duplication test (136 columns outside the
+# conserved block, 180 needed), and one copy per locus passed it (321).
+copy_loci <- function(names, seqs) {
+  n <- length(seqs)
+  if (n < 2) return(seq_len(n))
+  fl <- seg_flank_lengths(names)
+  len <- nchar(seqs)
+  w <- locus_cfg$flank
+  k <- locus_cfg$k
+  fs <- list(toupper(stri_sub(seqs, pmax(1L, fl$lx - w + 1L), fl$lx)),
+             toupper(stri_sub(seqs, len - fl$rx + 1L, pmin(len, len - fl$rx + w))))
+  st <- seq(1L, w - k + 1L, by = locus_cfg$step)
+  km <- rbindlist(lapply(1:2, function(sd) data.table(i = rep(seq_len(n), each = length(st)), side = sd,
+                                                      km = stri_sub(rep(fs[[sd]], each = length(st)),
+                                                                    rep(st, n), length = k))))
+  km <- km[nchar(km) == k & !grepl("N", km, fixed = TRUE)]
+  nl <- grepl("A", km$km, fixed = TRUE) + grepl("C", km$km, fixed = TRUE) +
+    grepl("G", km$km, fixed = TRUE) + grepl("T", km$km, fixed = TRUE)
+  km <- km[nl >= locus_cfg$min_letters]
+  if (nrow(km) == 0) return(seq_len(n))
+  r <- rc(km$km)
+  km[, km := fifelse(km <= r, km, r)]          # canonical k-mer: both strands match
+  km <- unique(km)
+  gen <- sub("#.*", "", sub("^>(_R_)?", "", names))
+  pr <- km[km, on = "km", allow.cartesian = TRUE, nomatch = NULL][i < i.i, .(i, j = i.i, ss = side * 10L + i.side)]
+  pr <- pr[gen[i] != gen[j]]
+  if (nrow(pr) == 0) return(seq_len(n))
+  # both flanks shared: left-left and right-right (same orientation) or left-right and right-left (opposite)
+  e <- unique(pr)[, .(ok = (11L %in% ss & 22L %in% ss) | (12L %in% ss & 21L %in% ss)), by = .(i, j)][ok == TRUE]
+  lab <- seq_len(n)
+  if (nrow(e) == 0) return(lab)
+  e <- rbind(e[, .(a = i, b = j)], e[, .(a = j, b = i)])
+  repeat {                                     # connected components: every copy takes the smallest index
+    m <- e[, .(m = min(lab[b])), by = a]
+    new <- lab
+    new[m$a] <- pmin(lab[m$a], m$m)
+    if (identical(new, lab)) break
+    lab <- new
+  }
+  lab
+}
+
 # Writes a cluster's alignment, flanks in lowercase and the insertion in uppercase
 write_cluster_alignment <- function(alim, cons_name) {
   out <- data.table(name = names(alim), seq = case_flanks(names(alim), alim))
@@ -2185,17 +2185,27 @@ process_cluster_2 <- function(job) {
   done <- function() {
     list(consensus = result, file = job$file, rank = job$rank,
          timing = data.table(win_start = job$start, win_end = job$end, set = job$ss, cluster = job$u,
-                             n_seqs = nrow(seqs_clust), mean_len = round(mean(nchar(seqs_clust$seq))),
+                             n_copies = n_copies, n_seqs = nrow(seqs_clust), mean_len = round(mean(nchar(seqs_clust$seq))),
                              max_len = max(nchar(seqs_clust$seq)), aln_len = aln_len,
                              seconds = round(mafft_s, 2),
                              total_s = round(as.numeric(difftime(Sys.time(), t_job, units = "secs")), 2),
                              t_start = round(as.numeric(t_job), 2), t_end = round(as.numeric(Sys.time()), 2),
                              pid = Sys.getpid()))
   }
+  # One copy per locus (copy_loci): orthologous copies (the same insertion in several genomes) have conserved
+  # flanks, which fail the segmental-duplication test below and bias the TSD. All copies still count in the
+  # name (_clus, _gens); _loci is the number of loci.
+  n_copies <- nrow(seqs_clust)
+  gens <- gen_counts(seqs_clust$name)
+  loc <- copy_loci(seqs_clust$name, seqs_clust$seq)
+  n_loci <- sum(!duplicated(loc))
+  # With fewer than -m loci all copies are aligned, as before: with 2 sequences the conservation of the flanks
+  # (segmental-duplication test) is mostly chance
+  if (n_loci >= opt$min_cluster) seqs_clust <- seqs_clust[!duplicated(loc)]
   clust_temp <- strsplit(seqs_clust$seq, "")
   names(clust_temp) <- seqs_clust$name
   seqs <- ape::as.DNAbin(clust_temp)
-  if (length(seqs) < 2) return(done())   # a single sequence (only possible with -m 1): no consensus
+  if (length(seqs) < 2) return(done())   # a single locus (or a single sequence with -m 1): no consensus
 
   t0 <- Sys.time()
   ali <- align_cluster(seqs, lengths(clust_temp))
@@ -2215,10 +2225,10 @@ process_cluster_2 <- function(job) {
   trimmed <- nchar(cc$cons) - (edges[2] - edges[1] + 1)
   cons <- gsub("-", "", cons)
   nam <- paste0(">CONS-", job$start, "-", job$end, "-", job$u, "-",
-                nchar(cons), "_clus", length(clust_temp), "_tsdl", et$len, "_tsdc", et$conf,
+                nchar(cons), "_clus", n_copies, "_loci", n_loci, "_tsdl", et$len, "_tsdc", et$conf,
                 "_tsdm", et$motif, "_tsdp", et$pval, "_tsdv", et$sv_len, "_tsdf", et$sv_frac,
                 "_tsds", et$src, "_tsdt", et$tandem,
-                "_gens", gen_counts(seqs_clust$name), "@@")
+                "_gens", gens, "@@")
   # The minimum size (-s) is tested on the conserved block before the edges are trimmed (raw_edges), as
   # svfind's segments were: an element whose svfind edges exclude its TSD and a few flank bases can end
   # up just below -s (a 98 bp TcMar MITE of the test data, 103 bp with the old edges).
@@ -2379,7 +2389,8 @@ classify_tes <- function() {
   final <- final[!duplicated(final$seq)]
   final <- final[order(-nchar(seq))]
   final[, `:=`(
-    cluster  = as.numeric(gsub("_tsdl.*", "", gsub(".*_clus", "", name))),
+    cluster  = as.numeric(gsub("_loci.*", "", gsub(".*_clus", "", name))),
+    loci     = as.numeric(gsub("_tsdl.*", "", gsub(".*_loci", "", name))),
     tsd_l    = as.numeric(gsub("_tsdc.*", "", gsub(".*_tsdl", "", name))),
     tsd_c    = as.numeric(gsub("_tsdm.*", "", gsub(".*_tsdc", "", name))),
     tsd_m    = gsub("_tsdp.*", "", gsub(".*_tsdm", "", name)),
@@ -2420,7 +2431,7 @@ classify_tes <- function() {
   # Working name: unique id + class. Final names are set at the end of stats_tes().
   final[, name := paste0(name, "#", Prediction)]
   fwrite(final, paste0(file, ".statspre"), sep = "\t")
-  return(final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t",
+  return(final[, c("name", "seq", "cluster", "loci", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t",
                    "gencount", "aln_file", "prot_strand",
                    names(hom_stats)), with = FALSE])
 }
@@ -2474,7 +2485,7 @@ hom_columns <- function(hc, lmap) {
 # final: the classified consensi (from classify_tes); genomes: genome names.
 stats_tes <- function(final, genomes) {
   lx("Stats start")
-  tes <- final[, c("name", "seq", "cluster", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t",
+  tes <- final[, c("name", "seq", "cluster", "loci", "tsd_l", "tsd_c", "tsd_m", "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t",
                    "gencount", "aln_file", "prot_strand",
                    names(hom_stats)), with = FALSE]
   # Classes from homology, before any structure rule: partners are the elements classified here (na_partner_calls)
@@ -2732,11 +2743,13 @@ stats_tes <- function(final, genomes) {
     tes[!pass & grepl("#DNA/", name) & hom_confidence %in% c("high", "low"),
         `:=`(pass = T, reason = paste0("DNA: ", hom_evidence, " call"))]
     tes[grepl("#RC", name), `:=`(pass = T, reason = "RC")]
-    ucut <- tryCatch(kneedle(tes[, .N, cluster]$cluster, tes[, .N, cluster]$N)[1],
-                     error = function(e) NA)
-    if (length(ucut) == 0 || is.na(ucut)) ucut <- rules_cfg$unknown_min_cluster
-    lx(paste("Unknown recovery cutpoint:", ucut))
-    tes[grepl("#Unknown", name) & cluster > max(rules_cfg$unknown_min_cluster, ucut), `:=`(pass = T, reason = "Unknown: large cluster")]
+    # Unknowns found at more than unknown_min_loci loci (orthologous copies, the same insertion in several genomes,
+    # count once). This replaces a kneedle cut-off on the cluster sizes, which jumped between runs with nearly the
+    # same cluster sizes (5 to 11 in Schmidtea mediterranea when a few consensi changed) and grew with the number of
+    # genomes, since one polymorphic insertion seen in many genomes gave a large cluster.
+    unk_loci <- tes[, grepl("#Unknown", name) & loci > rules_cfg$unknown_min_loci]
+    tes[unk_loci, `:=`(pass = T, reason = "Unknown: many loci")]
+    lx(paste("Unknown elements accepted at more than", rules_cfg$unknown_min_loci, "loci:", sum(unk_loci)))
     # This should go at the end of the filters
     tes[, TR2 := maxRep > lente / rules_cfg$tandem_frac]
     tes[is.na(TR2), TR2 := F]
@@ -2920,7 +2933,7 @@ stats_tes <- function(final, genomes) {
       tsd_sf := fcase(tsd_l == 2 & tsd_m == "TA", "DNA/TcMar", tsd_l == 2 & tsd_m == "AT", "DNA/PIF-Harbinger|DNA/PIF-ISL2EU",
                       tsd_l == 8, "DNA/hAT", tsd_l == 4 & tsd_m == "TTAA", "DNA/PiggyBac|DNA/Kolobok",
                       default = "")]
-  stats_data <- tes[, c("name", "lente", "pass", "reason", names(hom_stats), "cluster", "tsd_l", "tsd_c", "tsd_m",
+  stats_data <- tes[, c("name", "lente", "pass", "reason", names(hom_stats), "cluster", "loci", "tsd_l", "tsd_c", "tsd_m",
                         "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t", "tsd_sf", "gencount", "type", "length", "lgap", "rgap",
                         "pa",
                         "tail3_motif", "tail3_len",
@@ -2930,7 +2943,7 @@ stats_tes <- function(final, genomes) {
   ### Last fixes
   stats_data[(tsd_m == "" | is.na(tsd_m)) & tsd_s != "svfind", tsd_c := 0]   # svfind TSDs can lack a motif
   
-  colnames(stats_data) <- c("name", "TE_len", "pass", "reason", unname(hom_stats), "cluster_size",
+  colnames(stats_data) <- c("name", "TE_len", "pass", "reason", unname(hom_stats), "cluster_size", "loci",
                             "TSD_length", "TSD_confidence", "TSD_motif", "TSD_pvalue",
                             "TSD_svfind", "TSD_svfind_support", "TSD_source", "TSD_target_tandem", "TSD_superfamily",
                             "gen_count",
@@ -3044,6 +3057,9 @@ genomes <- basename(genome_paths)
 invisible(tryCatch({seg_flanks <- read_poly(genomes)}, error = function(err) {
   end_pantera(paste("Error reading polymorphisms ->",geterrmessage()))
 }))
+# Keyed once, so that the many lookups by segment name (seg_flank_lengths, seg_overlaps: per cluster in loop 2)
+# do not sort the whole table each time (mult = "first" keeps the first row of a name, setkey being stable)
+setkey(seg_flanks, name)
 
 invisible(tryCatch({find_repeats()}, error = function(err) {
   end_pantera(paste("Error round 1 ->",geterrmessage()))

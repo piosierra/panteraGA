@@ -82,7 +82,7 @@ In the output folder:
 |---|---|
 | `mylib-pantera-final.fa` | The library: the TE consensus sequences accepted by the structural checks |
 | `mylib-pantera-rejected.fa` | The consensus sequences rejected by the checks |
-| `mylib-pantera-final.stats.tsv` | Per element, accepted or rejected: length, class, `pass` and the `reason` (the rule that accepted or rejected it), cluster size, TSD, terminal repeats, tails, copies per genome... |
+| `mylib-pantera-final.stats.tsv` | Per element, accepted or rejected: length, class, `pass` and the `reason` (the rule that accepted or rejected it), cluster size (`cluster_size`, copies) and `loci` (copies of the same insertion in several genomes count once), TSD, terminal repeats, tails, copies per genome... |
 | `alignments/` | The alignment (`.maf`) behind each consensus, named as the element. Each copy shows its flanks in lowercase and the insertion in uppercase |
 | `annotations/` | A BED file per genome with the copies of each accepted element |
 | `pantera.log` | Log of the run |
@@ -121,6 +121,8 @@ Confidence: `high` and `low` are the protein rule's confidence (`low`: one domai
 Domain classes: AP aspartic protease, ATPase, CHD chromodomain, ENDO endonuclease, ENV envelope, GAG capsid, GIY GIY-YIG nuclease, HEL helicase, INT integrase, POLB DNA polymerase B, REP Rep nuclease, RH RNase H, RT reverse transcriptase, TPase DDE transposase, YR tyrosine recombinase.
 
 ## Element edges, TSDs and partners
+
+Copies from different genomes whose flanks next to the insertion (60 bp each side) share 16-mers on both sides are the same insertion found in several genomes (one locus, an orthologous copy). When a cluster has at least `-m` loci, one copy per locus is aligned: orthologous copies have conserved flanks, which would look like a segmental duplication and bias the TSD. Unknown elements found at more than 5 loci are accepted ("Unknown: many loci"; `rules_cfg$unknown_min_loci`).
 
 The edges of each element are where most of its copies' svfind segments start and end: svfind finds each insertion against the other genome, without its target site duplication (TSD). They are moved by at most one base to where the copies agree best on a TSD. When no copy has svfind boundaries, the edges come from the conservation of the alignment and a search for the TSD.
 
