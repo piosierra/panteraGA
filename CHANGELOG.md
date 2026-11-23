@@ -10,6 +10,10 @@
 - `-d` also keeps the classifier's per-chunk files (`hmm_classifier/`).
 - `scripts/run_dev.sh` uses the clone's `model/hmm/` when it is there.
 
+### Changed (Unknowns with a long ORF)
+- Unknowns that no other rule accepts or rejects are accepted when their longest ORF is at least `rules_cfg$unknown_min_orf` (900 nt, 300 aa) and a TSD supports their edges in at least `rules_cfg$unknown_orf_tsd_conf` (0.5) of the copies, the target not in a short tandem repeat ("Unknown: long ORF and TSD"; the log gives their number). Rejection rules that come later (too many Ns, microsatellite, too few copies, contained) still apply. The stats columns `orf1`-`orf3` are in nucleotides (README).
+- Results, same masked alignments as patch 9: 11 elements accepted, nothing else changes. Schmidtea mediterranea 126 -> 134 (8 Unknowns of 2.4-4.1 kb with 0.9-2.3 kb ORFs), Biomphalaria glabrata 509 -> 511 (two Unknowns of 8.3-8.4 kb with 2.8 kb ORFs), E. cirrhosa 116 -> 117 (one of 2.8 kb). The other sets have no such element. Test data unchanged.
+
 ### Changed (orthologous copies, Unknown rule)
 - Orthologous copies count once. Copies from different genomes whose flanks next to the insertion (60 bp each side, `locus_cfg`) share 16-mers on both sides, in either orientation, are one insertion found in several genomes (one locus; `copy_loci`, one join on canonical k-mers per loop 2 cluster). When a loop 2 cluster has at least `-m` loci, one copy per locus (the longest) is aligned; with fewer loci all copies are aligned, as before. Orthologous copies have conserved flanks, which failed the segmental-duplication test (`loop2_cfg$min_trimmed`) and made the TSD look better supported than it is: in five D. melanogaster strains, 5 of the 16 copies of the I element were one insertion, its cluster had 136 columns outside the conserved block (180 needed) and gave no consensus; one copy per locus gives 321.
 - Stats file: new column `loci` (after `cluster_size`, which still counts copies): the number of loci of the element's cluster.

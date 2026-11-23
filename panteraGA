@@ -165,6 +165,8 @@ rules_cfg <- list(
   dirs_max_len = 10000,   #   and max length
   sine_max_len = 500,     # SINE: max length to pass
   unknown_min_loci = 5,   # Unknown: passes when found at more loci than this (copies of one insertion count once)
+  unknown_min_orf = 900,  # Unknown with no rule: passes with a longest ORF of at least this many nucleotides (300 aa)
+  unknown_orf_tsd_conf = 0.5, #   and a TSD in at least this fraction of the copies
   ltr_tsd_min = 4,        # LTR TSD length range, for reclassifying Unknowns as LTR
   ltr_tsd_max = 6,
   tgca_tsd_conf = 0.8,    # Unknown with TG..CA ends: min TSD confidence to become LTR
@@ -2771,6 +2773,16 @@ stats_tes <- function(final, genomes) {
         length > rules_cfg$unknown_ltr_min_len &
         lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap & TR2 == F, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
         reason = "Unknown to LTR: terminal LTRs and TSD"), by = .I]
+    # Unknowns that no rule accepted or rejected, with a long ORF and edges confirmed by a TSD (in at least
+    # unknown_orf_tsd_conf of the copies, target not in a short tandem repeat): an uncharacterised element with a
+    # coding region, not noise. orf1 is in nucleotides. In the 14 genome sets of patch 9, 11 such elements: 8 in
+    # Schmidtea mediterranea (0.9-1.05 kb ORFs), 2 of 8.3 kb in Biomphalaria glabrata (919 aa ORFs), 1 in Eledone.
+    long_orf <- tes[, grepl("#Unknown", name) & reason == "no rule accepts it" & orf1 >= rules_cfg$unknown_min_orf &
+                      tsd_l > 0 & tsd_c >= rules_cfg$unknown_orf_tsd_conf &
+                      !(fifelse(is.na(tsd_t), 0, tsd_t) >= tsd_cfg$tandem_frac) &
+                      !((tsd_m == "" | is.na(tsd_m)) & tsd_s != "svfind")] %in% TRUE
+    tes[long_orf, `:=`(pass = T, reason = "Unknown: long ORF and TSD")]
+    lx(paste("Unknown elements accepted with a long ORF and a TSD:", sum(long_orf)))
     # No reclassification of Unknowns as SINE by structure: SINEs come from the classifier's SINE models only
     # (removed: Unknown shorter than 400 bp with a polyA within 5 bp of an end).
     # Partner calls: non-autonomous derivatives take the partner's class with "-NA" and pass, also with low termini
