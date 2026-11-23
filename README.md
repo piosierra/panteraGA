@@ -109,7 +109,7 @@ Homology columns of the stats file:
 | `homology_label` | Label of the classifier (pantera classification, `TYPE/subtype`), or `none` |
 | `homology_confidence` | `high`, `low`, `weak` or `none` (below) |
 | `homology_evidence` | What made the call: `protein`, `TIR` (TIR end models), `partner` (shared ends), `TIR+partner`, `Helitron` (end models), `SINE` |
-| `homology_sub` | Sub label (lineage below the subtype, e.g. Tekay, Pogo); not reported for protein sub labels whose label has a single sub-label model (`class_cfg$min_sub_models`) |
+| `homology_sub` | Sub label (lineage below the subtype, e.g. Tekay, Pogo); not reported for a protein sub label when it is the only lineage of its label that scored on the element (`class_cfg$min_sub_models`), except DNA/CMC EnSpm (`class_cfg$single_sub_ok`), so CACTA is `DNA/CMC-EnSpm` |
 | `homology_domains` | Domain classes of the protein call (e.g. `GAG,INT,RH,RT`; abbreviations below) |
 | `homology_alternatives` | For `weak` calls: other labels that share the only domain found |
 | `homology_flags` | Warnings: `tandem` (TRF arrays cover >= 50%), `low_complexity` (dustmasker >= 30%), `ncRNA:<families>` (Rfam hits >= 30%, or any rRNA), `host_protein:<Swiss-Prot entry>` (only with the optional host part), `chimera:<what>` (strong evidence for two TYPEs) |

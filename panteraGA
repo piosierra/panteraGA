@@ -130,8 +130,12 @@ tsd_cfg <- list(
 
 # Classification (HMM classifier, scripts/pantera_classify.R; its own settings are hmm_cfg in that file)
 class_cfg <- list(
-  min_sub_models = 2      # a protein sub label is reported only if its label has at least this many sub-label
-                          #   models (with one, every hit gets it: e.g. every CR1 would be Zenon)
+  min_sub_models = 2,     # a protein sub label is reported only if at least this many sub lineages of its label
+                          #   scored on the element (with one lineage modelled, every hit of the label gets it:
+                          #   e.g. every CR1 would be Zenon)
+  single_sub_ok = c("DNA/CMC:EnSpm")  # label:sub reported even as the only lineage that scored, because it was
+                          #   tested not to capture the label's other lineages (step 13: every EnSpm call fell
+                          #   on an EnSpm/CACTA element, 420 of 420 and 42 of 42; no Chapaev got it)
 )
 
 # Homology columns kept from the HMM classifier: internal name -> column of the stats file
@@ -2440,14 +2444,15 @@ classify_tes <- function() {
 
 # Homology columns of each consensus, from the HMM classifier's table (hc) and the label map (lmap): Prediction is
 # the class written in the library (the RepeatMasker name of the label; Unknown when there is no call), the other
-# columns go to the stats. A protein sub label is not reported when its label has fewer than
-# class_cfg$min_sub_models sub-label models: with a single model, every hit of the label gets that sub label (e.g.
-# every CR1 would be Zenon).
+# columns go to the stats. A protein sub label is not reported when fewer than class_cfg$min_sub_models sub
+# lineages of its label scored on the element: with a single lineage, every hit of the label gets that sub label
+# (e.g. every CR1 would be Zenon). Exception: the label:sub pairs in class_cfg$single_sub_ok (DNA/CMC:EnSpm).
 hom_columns <- function(hc, lmap) {
   h <- hc[, .(input_id, hom_label = fifelse(label == "", "none", label), hom_confidence = confidence,
               hom_evidence = evidence, hom_sub = sub, sub_source, sub_models, hom_domains = domains,
               hom_alternatives = alternatives, hom_flags = flags, hom_notes = notes)]
-  single <- h$sub_source == "protein" & suppressWarnings(as.integer(h$sub_models)) < class_cfg$min_sub_models
+  single <- h$sub_source == "protein" & suppressWarnings(as.integer(h$sub_models)) < class_cfg$min_sub_models &
+    !(paste0(h$hom_label, ":", h$hom_sub) %in% class_cfg$single_sub_ok)
   h[which(single), hom_sub := ""]
   # RepeatMasker name of the label, or of label + sub label when the map has a row for that sub label (e.g.
   # DNA/Tc1-Mariner with sub label Pogo -> DNA/TcMar-Pogo); only sub labels that are reported count
