@@ -129,7 +129,7 @@ class_cfg <- list(
 hom_stats <- c(hom_label = "homology_label", hom_confidence = "homology_confidence",
                hom_evidence = "homology_evidence", hom_sub = "homology_sub", hom_domains = "homology_domains",
                hom_alternatives = "homology_alternatives", hom_flags = "homology_flags",
-               hom_notes = "homology_notes")
+               hom_notes = "homology_notes", hom_ends = "homology_ends")
 
 # Structure rules (stats_tes): which elements pass, and reclassification.
 # "gap" is the distance in bp from a terminal repeat (LTR or TIR) to the element end.
@@ -241,8 +241,9 @@ read_pars <- function() {
       "anno_identity",  "z", 1, "double",    "Min identity of a hit, and min length ratio hit/element, for annotation [0.80]",
       "align_iterations","I", 1, "integer",  "Max mafft refinement iterations for clusters of < 100 sequences < 3 kb; 2 is faster, changes some consensi [1000]",
       "seed",           "r", 1, "integer",   "Random seed for the TIR test; the same data and seed give the same results [1]",
-      "tandem_mask",    "t", 0, "logical",   "Soft mask the tandem arrays found by FasTAN before aligning (FastGA -M); faster with satellite-rich genomes",
-      "tandem_min_len", "w", 1, "integer",   "With -t, min length of the tandem arrays masked, in bp; 0 masks them all [1000]",
+      "tandem_mask",    "t", 0, "logical",   "Soft mask the tandem arrays found by FasTAN before aligning (FastGA -M); the default, kept for old command lines",
+      "no_tandem_mask", "N", 0, "logical",   "Do not mask tandem arrays before aligning (masking is the default; faster with satellite-rich genomes)",
+      "tandem_min_len", "w", 1, "integer",   "Min length of the tandem arrays masked, in bp; 0 masks them all [1000]",
       "keep_alignments","k", 0, "logical",   "Keep the FastGA alignments (.1aln)",
       "debug",          "d", 0, "logical",   "Keep intermediate files",
       "verbose",        "v", 0, "logical",   "Show log messages on screen",
@@ -367,9 +368,11 @@ read_pars <- function() {
     opt$seed <- 1
   }
 
-  if (is.null(opt$tandem_mask)) {
-    opt$tandem_mask <- FALSE
+  # Tandem masking (-t) is the default; -N turns it off
+  if (!is.null(opt$no_tandem_mask) && !is.null(opt$tandem_mask)) {
+    stop("[--tandem_mask|-t] and [--no_tandem_mask|-N] cannot be used together")
   }
+  opt$tandem_mask <- is.null(opt$no_tandem_mask)
 
   if (is.null(opt$tandem_min_len)) {
     opt$tandem_min_len <- 1000
@@ -2411,7 +2414,7 @@ classify_tes <- function() {
   hcols <- c(names(hom_stats), "Prediction", "prot_strand")
   final[hom, on = "input_id", (hcols) := mget(paste0("i.", hcols))]   # update join: keeps the order of final
   final[, input_id := NULL]
-  final[is.na(Prediction), `:=`(Prediction = "Unknown", hom_label = "none", hom_confidence = "none")]
+  final[is.na(Prediction), `:=`(Prediction = "Unknown", hom_label = "none", hom_confidence = "none", hom_ends = "")]
   lx(paste("Classified:", paste(names(table(final$hom_confidence)), table(final$hom_confidence), collapse = ", ")))
   final <- final[order(-nchar(seq))]
   # Working name: unique id + class. Final names are set at the end of stats_tes().
@@ -2446,6 +2449,21 @@ hom_columns <- function(hc, lmap) {
   }
   h[hom_confidence == "none" | is.na(Prediction), Prediction := "Unknown"]
   h[, c("sub_source", "sub_models") := NULL]
+  # DNA transposon ends: the class (RepeatMasker name) of the TIR end models or of the end partner when the call
+  # covers both ends, whatever the final call is (a protein call wins over ends in the classifier). TIR field:
+  # label:ends:confidence[:sub]; partner field: label:partner:source:ends:score[...]. Used by stats_tes to call
+  # elements with the ends of a known DNA transposon and another protein inside non-autonomous DNA.
+  tf <- strsplit(hc$tir, ":", fixed = TRUE); pf <- strsplit(hc$partner, ":", fixed = TRUE)
+  fld <- function(x, i) vapply(x, function(v) if (length(v) >= i) v[i] else "", "")
+  t_lab <- fld(tf, 1); t_end <- fld(tf, 2); t_sub <- fld(tf, 4)
+  p_lab <- fld(pf, 1); p_end <- fld(pf, 4)
+  e_lab <- fifelse(startsWith(t_lab, "DNA/") & t_end == "both", t_lab,
+                   fifelse(startsWith(p_lab, "DNA/") & p_end == "both", p_lab, ""))
+  e_sub <- fifelse(startsWith(t_lab, "DNA/") & t_end == "both", t_sub, "")
+  e_rm <- base$repeatmasker[match(e_lab, base$label)]
+  e_ref <- subs$repeatmasker[match(paste(e_lab, e_sub), paste(subs$label, subs$sub))]
+  e_rm[!is.na(e_ref) & e_sub != ""] <- e_ref[!is.na(e_ref) & e_sub != ""]
+  h[, hom_ends := fifelse(is.na(e_rm) | e_lab == "", "", e_rm)]
   h
 }
 
@@ -2707,6 +2725,12 @@ stats_tes <- function(final, genomes) {
     # finder (good_tir only knows the BLAST calls made before that step)
     tes[grepl("#DNA", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(pass = T, reason = "DNA: TIRs")]
     tes[name %in% tir_reco$new, `:=`(pass = T, reason = "reclassified as DNA: matches a DNA element")]
+    # DNA elements with a superfamily from the classifier (protein, TIR end models or end partner; high or low
+    # confidence) are accepted without the structural TIR test: in 11 new genome pairs, 74 such elements failed it
+    # (no repeat found, a direct repeat found instead, or a TIR 8 bp or more from an end), among them high-confidence
+    # PiggyBac, Kolobok and hAT transposase calls and low-confidence (non-autonomous) TIR and partner calls.
+    tes[!pass & grepl("#DNA/", name) & hom_confidence %in% c("high", "low"),
+        `:=`(pass = T, reason = paste0("DNA: ", hom_evidence, " call"))]
     tes[grepl("#RC", name), `:=`(pass = T, reason = "RC")]
     ucut <- tryCatch(kneedle(tes[, .N, cluster]$cluster, tes[, .N, cluster]$N)[1],
                      error = function(e) NA)
@@ -2736,9 +2760,9 @@ stats_tes <- function(final, genomes) {
         reason = "Unknown to LTR: terminal LTRs and TSD"), by = .I]
     # No reclassification of Unknowns as SINE by structure: SINEs come from the classifier's SINE models only
     # (removed: Unknown shorter than 400 bp with a polyA within 5 bp of an end).
-    # Partner calls: non-autonomous derivatives take the partner's class with "-NA" and pass; with low termini
-    # identity they take it too but are accepted or rejected by the rules above; solo LTRs and internal
-    # deletions of LINEs take the partner's class and are rejected. "{partner}" becomes the partner's final name.
+    # Partner calls: non-autonomous derivatives take the partner's class with "-NA" and pass, also with low termini
+    # identity (NA_low); solo LTRs and internal deletions of LINEs take the partner's class and are rejected.
+    # "{partner}" becomes the partner's final name.
     tes[, `:=`(partner = NA_character_, partner_type = NA_character_, partner_ident = NA_real_)]
     tes[na_calls, on = "wid", `:=`(partner = i.partner, partner_type = i.partner_type, partner_ident = i.partner_ident)]
     for (k in which(!is.na(tes$partner_type))) {
@@ -2746,12 +2770,44 @@ stats_tes <- function(final, genomes) {
       ty <- tes$partner_type[k]
       set(tes, k, "name", paste0(tes$wid[k], "#", pc, if (ty %in% c("NA_high", "NA_low")) "-NA" else ""))
       if (ty == "NA_high") set(tes, k, c("pass", "reason"), list(TRUE, "non-autonomous: termini of {partner}"))
+      if (ty == "NA_low") set(tes, k, c("pass", "reason"),
+                              list(TRUE, "non-autonomous (low termini identity): termini of {partner}"))
       if (ty == "solo_LTR") set(tes, k, c("pass", "reason"), list(FALSE, "solo LTR of {partner}"))
       if (ty == "internal_deletion") set(tes, k, c("pass", "reason"), list(FALSE, "internal deletion of {partner}"))
     }
     na_n <- table(na_calls$partner_type)
     lx(paste("Partner calls by shared termini:", if (length(na_n)) paste(names(na_n), na_n, collapse = ", ") else "none"))
+    # Second pass, solo LTRs of non-autonomous LTR elements: the -NA LTR elements of the first pass with terminal
+    # LTRs of their own (within end_gap of both ends) are partners for solo-LTR calls only (same ltr_ident and
+    # solo_max), among the Unknowns of the classifier not called by the first pass or called NA_low. In Biomphalaria
+    # glabrata, Gypsy-NA elements with 723-980 bp LTRs share only the LTR edges of their Gypsy partners (termini
+    # identity 0.25-0.37), and 13 elements of 688-980 bp, 86-98% identical to their LTRs, were accepted as NA_low.
+    p2 <- tes[partner_type %in% c("NA_high", "NA_low") & startsWith(gsub(".*#", "", name), "LTR") & type == "LTR" &
+                length > 0 & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, wid]
+    u2 <- setdiff(tes[wid %in% cls0[cls == "Unknown"]$wid & (is.na(partner_type) | partner_type == "NA_low"), wid], p2)
+    solo2 <- if (length(p2) > 0 && length(u2) > 0) {
+      na_partner_calls(te_data_mix, tes[, .(wid, cls = gsub(".*#", "", name), seq, type, length)], u2, p2)[
+        partner_type == "solo_LTR"]
+    } else NULL
+    if (length(solo2) > 0 && nrow(solo2) > 0) {
+      k <- match(solo2$wid, tes$wid)
+      tes[k, `:=`(name = paste0(wid, "#", solo2$partner_class), pass = FALSE, reason = "solo LTR of {partner}",
+                  partner = solo2$partner, partner_type = "solo_LTR", partner_ident = solo2$partner_ident)]
+    }
+    lx(paste("Solo LTRs of non-autonomous LTR elements:", if (is.null(solo2)) 0 else nrow(solo2)))
     tes[, wid := NULL]
+    # Ends of a known DNA transposon, another protein inside: when the classifier's TIR end models or end partner
+    # call a DNA superfamily at both ends (homology_ends) and the element's call is another class, the ends decide.
+    # The element is a non-autonomous DNA transposon of that superfamily ("-NA") that carries the other protein, and
+    # the reason names it. In Biomphalaria glabrata, 7 elements of 1.8-3.1 kb with hAT ends (14 bp TIRs, 8 bp TSD)
+    # were called LINE (I, RTE) on a reverse transcriptase alone and rejected.
+    ends_dna <- tes[, which(!is.na(hom_ends) & nzchar(hom_ends) & !startsWith(gsub(".*#", "", name), "DNA"))]
+    if (length(ends_dna) > 0) {
+      tes[ends_dna, `:=`(reason = paste0("non-autonomous DNA: ", hom_ends, " ends, ",
+                                         gsub(".*#", "", name), " protein inside"),
+                         name = paste0(gsub("#.*", "", name), "#", hom_ends, "-NA"), pass = T)]
+    }
+    lx(paste("Elements with the ends of a DNA transposon and another protein (non-autonomous DNA):", length(ends_dna)))
     # SINEs with a tail only at the 5' end are turned so that it is 3' (orientation "tail"), unless oriented by a
     # protein call. Their tails, gaps and alignment follow.
     ft <- tes[, which(startsWith(gsub(".*#", "", name), "SINE") & orientation != "protein" & tail5_len > 0 &
@@ -2854,8 +2910,19 @@ stats_tes <- function(final, genomes) {
   wfasta(tes[pass == T, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-final.fa")))
   wfasta(tes[pass == F, c("name", "seq")], outf(paste0(opt$lib_name, "-pantera-rejected.fa")))
   tes[, pa := tail3_motif %in% "A" | tail5_motif %in% "A"]   # stats polyA: an A tail (detect_tail) at an end
+  # Superfamily suggested by the TSD alone, for DNA elements (stats TSD_superfamily; low confidence, the class is not
+  # changed). Over 737 DNA elements with a superfamily call in 14 genome sets the TSD named it right as follows:
+  # TA -> TcMar 61/67, AT -> PIF (Harbinger or ISL2EU) 23/23, 8 bp -> hAT 203/222 (but 3 of 7 in D. melanogaster,
+  # where P elements also have 8 bp), TTAA -> PiggyBac or Kolobok 46/48. Other lengths (3, 5, 9 bp...) are shared by
+  # several superfamilies. Not given for targets in short tandem repeats (TSD_target_tandem).
+  tes[, tsd_sf := ""]
+  tes[startsWith(gsub(".*#", "", name), "DNA") & !(fifelse(is.na(tsd_t), 0, tsd_t) >= tsd_cfg$tandem_frac),
+      tsd_sf := fcase(tsd_l == 2 & tsd_m == "TA", "DNA/TcMar", tsd_l == 2 & tsd_m == "AT", "DNA/PIF-Harbinger|DNA/PIF-ISL2EU",
+                      tsd_l == 8, "DNA/hAT", tsd_l == 4 & tsd_m == "TTAA", "DNA/PiggyBac|DNA/Kolobok",
+                      default = "")]
   stats_data <- tes[, c("name", "lente", "pass", "reason", names(hom_stats), "cluster", "tsd_l", "tsd_c", "tsd_m",
-                        "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t", "gencount", "type", "length", "lgap", "rgap", "pa",
+                        "tsd_p", "tsd_v", "tsd_f", "tsd_s", "tsd_t", "tsd_sf", "gencount", "type", "length", "lgap", "rgap",
+                        "pa",
                         "tail3_motif", "tail3_len",
                         "tail5_motif", "tail5_len", "tr3_relatives", "fragment_of", "orientation",
                         "partner", "partner_type", "partner_ident",
@@ -2865,7 +2932,8 @@ stats_tes <- function(final, genomes) {
   
   colnames(stats_data) <- c("name", "TE_len", "pass", "reason", unname(hom_stats), "cluster_size",
                             "TSD_length", "TSD_confidence", "TSD_motif", "TSD_pvalue",
-                            "TSD_svfind", "TSD_svfind_support", "TSD_source", "TSD_target_tandem", "gen_count",
+                            "TSD_svfind", "TSD_svfind_support", "TSD_source", "TSD_target_tandem", "TSD_superfamily",
+                            "gen_count",
                             "struct_type", "struct_len", "left_gap",
                             "right_gap", "polyA", "tail3_motif", "tail3_len", "tail5_motif", "tail5_len",
                             "tr3_relatives", "fragment_of", "orientation", "partner", "partner_type", "partner_ident",

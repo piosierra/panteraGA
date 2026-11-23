@@ -66,8 +66,8 @@ panteraGA -g genomes.txt -b mylib -o out -T 16
 | `-z, --anno_identity` | 0.80 | Min identity of a hit, and min length ratio hit/element, for genome annotation |
 | `-I, --align_iterations` | 1000 | Max mafft refinement iterations (L-INS-i) for clusters of fewer than 100 sequences shorter than 3 kb; 1000 is what mafft `--auto` uses. `-I 2` is somewhat faster (about 10% of the processing time in a test with ~600 elements) but changes some consensi: in that test about 20% differed slightly and a few short elements were gained or lost |
 | `-r, --seed` | 1 | Random seed for the TIR test. The same data and seed give identical results, whatever `-T` |
-| `-t, --tandem_mask` | | Soft mask the tandem arrays of each genome, found with [FasTAN](https://github.com/thegenemyers/FASTAN), before aligning (`FastGA -M`). Much faster with genomes rich in satellites, with almost the same segments (see [Tandem masking](#tandem-masking)). The genome databases and masks are written to `tandem/` in the output folder, and kept with `-k` or `-d` |
-| `-w, --tandem_min_len` | 1000 | With `-t`, min length of the tandem arrays masked, in bp. Shorter arrays add little alignment time, but are found inside some TEs (e.g. in LTRs), whose copies masking can lose. `0` masks them all |
+| `-N, --no_tandem_mask` | | Do not mask tandem arrays before aligning. By default the tandem arrays of each genome, found with [FasTAN](https://github.com/thegenemyers/FASTAN), are soft masked before aligning (`FastGA -M`): much faster with genomes rich in satellites, with almost the same segments (see [Tandem masking](#tandem-masking)). The genome databases and masks are written to `tandem/` in the output folder, and kept with `-k` or `-d`. `-t, --tandem_mask` is still accepted and does nothing |
+| `-w, --tandem_min_len` | 1000 | Min length of the tandem arrays masked, in bp. Shorter arrays add little alignment time, but are found inside some TEs (e.g. in LTRs), whose copies masking can lose. `0` masks them all |
 | `-k, --keep_alignments` | | Keep the FastGA alignments, named after the two genomes (`<genome1>_<genome2>.1aln`). A run reuses the alignments it finds in its output folder, including ones named `pantera<n>.1aln` by earlier versions |
 | `-d, --debug` | | Keep intermediate files (all segments in `pantera_lib_0.fa`, the loop 1 output in `segments_candidates.fa`, `loop_1/`, `loop_2/`, the consensi before classification, the classifier's per-chunk tool outputs in `hmm_classifier/`), and write the loop 2 timing files (`loop2_window_timing.tsv`, `loop2_mafft_timing.tsv`; summarise them with `scripts/loop2_timing_summary.R`) |
 | `-v, --verbose` | | Show log messages on screen |
@@ -87,7 +87,7 @@ In the output folder:
 | `annotations/` | A BED file per genome with the copies of each accepted element |
 | `pantera.log` | Log of the run |
 
-With `-t`, `tandem/` holds the genome databases (`.1gdb`), the tandem arrays found by FasTAN (`<genome>_tan.1ano`) and the ones masked, at least `-w` bp long (`<genome>_tan<w>.1ano`), when kept with `-k` or `-d`. The alignments refer to the databases, so keep them together.
+Unless `-N` is given, `tandem/` holds the genome databases (`.1gdb`), the tandem arrays found by FasTAN (`<genome>_tan.1ano`) and the ones masked, at least `-w` bp long (`<genome>_tan<w>.1ano`), when kept with `-k` or `-d`. The alignments refer to the databases, so keep them together.
 
 Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within each class (accepted and rejected elements share the numbering).
 
@@ -114,6 +114,7 @@ Homology columns of the stats file:
 | `homology_alternatives` | For `weak` calls: other labels that share the only domain found |
 | `homology_flags` | Warnings: `tandem` (TRF arrays cover >= 50%), `low_complexity` (dustmasker >= 30%), `ncRNA:<families>` (Rfam hits >= 30%, or any rRNA), `host_protein:<Swiss-Prot entry>` (only with the optional host part), `chimera:<what>` (strong evidence for two TYPEs) |
 | `homology_notes` | `single_domain:<class>` for weak calls; `close_runner_up:<label>` when the call leads the next label by < 50 bits; `partner_conflict:<label>` when TIR ends and partner disagree |
+| `homology_ends` | DNA transposon class of the element's ends (TIR end models, or end partner) when they match both ends, whatever the final call; empty otherwise |
 
 Confidence: `high` and `low` are the protein rule's confidence (`low`: one domain class below 100 bits, or RH, YR, CHD or HEL alone), TIR + partner of the same superfamily is `high`, TIR alone keeps its own, partner alone is `low`. `weak`: protein calls whose only domain class is shared with other TYPEs (LTR integrase, RNase H or low reverse transcriptase alone, DIRS tyrosine recombinase alone, PLE GIY-YIG alone), and Helitron-end calls; structure must confirm them. In cross-validation on curated elements, protein calls were right in 99.98% (high), 99.7% (low) and 72% (weak) of cases.
 
@@ -129,7 +130,7 @@ An Unknown element whose two termini are those of an element classified by homol
 
 Elements are oriented by the strand of their protein call; without one, as the longer element (with a protein call) whose 3' end they match, if any (solo LTRs, 5'-truncated LINE copies); otherwise by their longest ORF. The stats column `orientation` says which: `protein`, `container` (turned to the longer element's strand), `tail` (a SINE turned so that its tail is 3') or `ORF` (including fragments already on their container's strand).
 
-Tails (stats `tail3_motif`, `tail3_len`, `tail5_motif`, `tail5_len`; `polyA` is TRUE when either is an A tail) are short tandem repeats (unit 1-6 bp, polyA = unit 1) of at least `-p` bp ending within 10 bp of an end. A LINE needs a long ORF and a tail at its 3' end (or no terminal repeat). SINEs come only from the classifier's SINE models; a SINE with its tail only at the 5' end is turned (`orientation` `tail`). Elements contained in a longer accepted LINE, LTR, PLE or RC element (one hit over 98% of the element at 98% identity, tails excluded), and Unknowns that are 3' fragments of an accepted LINE or PLE (90% at 90%), take the container's class and are rejected ("contained in"). Elements with no homology call that the classifier flags both `tandem` and `low_complexity` are microsatellites: class `Simple_repeat`, rejected ("microsatellite").
+Tails (stats `tail3_motif`, `tail3_len`, `tail5_motif`, `tail5_len`; `polyA` is TRUE when either is an A tail) are short tandem repeats (unit 1-6 bp, polyA = unit 1) of at least `-p` bp ending within 10 bp of an end. A LINE needs a long ORF and a tail at its 3' end (or no terminal repeat). SINEs come only from the classifier's SINE models; a SINE with its tail only at the 5' end is turned (`orientation` `tail`). Elements contained in a longer accepted LINE, LTR, PLE or RC element (one hit over 98% of the element at 98% identity, tails excluded), and Unknowns that are 3' fragments of an accepted LINE or PLE (90% at 90%), take the container's class and are rejected ("contained in"). Elements with no homology call that the classifier flags both `tandem` and `low_complexity` are microsatellites: class `Simple_repeat`, rejected ("microsatellite"). DNA elements with a superfamily call (protein, TIR end models or end partner, high or low confidence) are accepted without the structural TIR test. An element whose ends are those of a known DNA transposon (`homology_ends`) but whose call is another class (e.g. a reverse transcriptase inside) is a non-autonomous DNA transposon of that superfamily: class `DNA/<superfamily>-NA`, with the inner class named in `reason`. Non-autonomous elements found by shared termini (`partner_type` `NA_low`) are accepted too. The `-NA` LTR elements with terminal LTRs of their own are then partners for solo-LTR calls, so that solo LTRs of non-autonomous LTR elements are rejected as such.
 
 TSD and partner columns of the stats file:
 
@@ -140,13 +141,14 @@ TSD and partner columns of the stats file:
 | `TSD_svfind_support` | Fraction of copies with that overlap |
 | `TSD_source` | What gave the TSD: `flanks` (flank caller, within the svfind range), `svfind` (median svfind TSD), `null` (flank caller against the cross-copy null), `none` |
 | `TSD_target_tandem` | Fraction of copies inserted into a short tandem repeat (both flanks repeat with a period up to 6 bp); from 0.5 the TSD is not used to reclassify |
+| `TSD_superfamily` | DNA elements only: superfamily suggested by the TSD alone (low confidence; the class is not changed): `DNA/TcMar` (TA; any TcMar-*), `DNA/PIF-Harbinger|DNA/PIF-ISL2EU` (AT), `DNA/hAT` (8 bp; any hAT-*), `DNA/PiggyBac|DNA/Kolobok` (TTAA); empty for other TSDs and for targets in short tandem repeats |
 | `partner` | Element of the run whose termini this one shares |
 | `partner_type` | `NA_high` (non-autonomous, `-NA` class), `NA_low` (same, low termini identity), `solo_LTR`, `internal_deletion` |
 | `partner_ident` | Identity over the partner's terminal repeat (TIR or LTR; 60 bp without one), the lower of the two termini |
 
 ## Tandem masking
 
-Long tandem arrays (satellites, centromeres) make FastGA extend huge alignments through them, and can dominate the alignment time. With `-t`, FasTAN finds the tandem arrays of each genome and those at least `-w` bp long (1 kb by default) are soft masked in the genome index, so FastGA starts no alignment inside them (alignments can still extend through them). Coordinates and sequences are unchanged: segments, alignments and annotations refer to the original genomes.
+Long tandem arrays (satellites, centromeres) make FastGA extend huge alignments through them, and can dominate the alignment time. By default (`-N` turns it off), FasTAN finds the tandem arrays of each genome and those at least `-w` bp long (1 kb by default) are soft masked in the genome index, so FastGA starts no alignment inside them (alignments can still extend through them). Coordinates and sequences are unchanged: segments, alignments and annotations refer to the original genomes.
 
 Short arrays are left unmasked because they add little alignment time, but are found inside some TEs: masking them all lost, in a test, a young Gypsy element with 51 bp tandem repeats in its LTRs.
 
