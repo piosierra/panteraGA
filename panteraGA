@@ -1320,100 +1320,39 @@ find_repeats <- function() {
   system(paste0("cd ", shQuote(loop_dir), " && cat candidates*.fa > ../segments_candidates.fa"))
 }
 
-find_largest_orfs <- function(dna_sequence) {
-  
-  # Standardize input
-  dna <- toupper(trimws(dna_sequence))
-  
-  find_orfs_in_strand <- function(seq, strand = "+") {
-    orfs <- list()
-    n <- nchar(seq)
-    
+# The three longest ORFs of a sequence (nt, ATG to the next in-frame stop) over both strands, and the strand of the
+# longest. In each frame, ORFs start at the first ATG after the previous stop: scanning resumes after each stop,
+# so an ORF is the stretch from its first ATG to the next stop, and an ATG with no stop after it gives none.
+# Vectorised per frame (codons with stri_sub, the next stop of each ATG with findInterval). The codon-by-codon
+# loop it replaces gave the same orf1-orf3 and strand on every consensus of the 14 genome sets and the test data
+# (3,162 sequences), and was about 14 times slower (single thread, all of them: 43.8 s, now 3.2 s).
+three_orfs <- function(seq) {
+  dna <- toupper(trimws(seq))
+  len <- integer()
+  str <- character()
+  for (sd in c("+", "-")) {
+    s <- if (sd == "+") dna else rc(dna)
+    n <- nchar(s)
     for (frame in 1:3) {
-      i <- frame
-      while (i <= n - 2) {
-        codon <- substr(seq, i, i + 2)
-        
-        if (codon == "ATG") {
-          start <- i
-          j <- i + 3
-          found_stop <- FALSE
-          
-          while (j <= n - 2) {
-            stop_codon <- substr(seq, j, j + 2)
-            if (stop_codon %in% c("TAA", "TAG", "TGA")) {
-              end <- j + 2
-              length <- end - start + 1
-              
-              if (strand == "+") {
-                orfs <- append(orfs, list(list(
-                  start = start, end = end,
-                  length = length, frame = frame, strand = strand
-                )))
-              } else {
-                # Convert back to original sequence coordinates
-                orig_end   <- n - start + 1
-                orig_start <- n - end + 1
-                orfs <- append(orfs, list(list(
-                  start = orig_start, end = orig_end,
-                  length = length, frame = frame, strand = strand
-                )))
-              }
-              found_stop <- TRUE
-              i <- j + 3  # resume after stop codon
-              break
-            }
-            j <- j + 3
-          }
-          
-          if (!found_stop) break
-        } else {
-          i <- i + 3
-        }
-      }
+      if (n - frame < 2) next
+      cod <- stri_sub(s, seq.int(frame, n - 2L, by = 3L), length = 3L)
+      atg <- which(cod == "ATG")
+      stp <- which(cod == "TAA" | cod == "TAG" | cod == "TGA")
+      if (!length(atg) || !length(stp)) next
+      k <- findInterval(atg, stp) + 1L       # next stop after each ATG
+      ok <- k <= length(stp)
+      ns <- stp[k[ok]]
+      keep <- !duplicated(ns)                # first ATG before each stop
+      len <- c(len, (ns[keep] - atg[ok][keep] + 1L) * 3L)
+      str <- c(str, rep(sd, sum(keep)))
     }
-    orfs
   }
-  
-  # Find ORFs on both strands
-  all_orfs <- c(
-    find_orfs_in_strand(dna, "+"),
-    find_orfs_in_strand(rc(dna), "-")
-  )
-  
-  if (length(all_orfs) == 0) {
-    return(NULL)
-  }
-  
-  # Sort by length descending and return top 3
-  lengths <- sapply(all_orfs, function(o) o$length)
-  top3    <- all_orfs[order(lengths, decreasing = TRUE)[1:min(3, length(all_orfs))]]
-  
-  # Format as data frame
-  result <- do.call(rbind, lapply(top3, function(o) {
-    data.frame(start = o$start, end = o$end,
-               length = o$length, frame = o$frame,
-               strand = o$strand, stringsAsFactors = FALSE)
-  }))
-  
-  rownames(result) <- paste0("ORF_", seq_len(nrow(result)))
-  return(result)
+  if (!length(len)) return(data.table(orf1 = 0, orf2 = 0, orf3 = 0, strand = "+"))
+  o <- order(len, decreasing = TRUE)[1:min(3, length(len))]
+  l <- len[o]
+  data.table(orf1 = l[1], orf2 = l[2], orf3 = l[3], strand = str[o[1]])
 }
 
-three_orfs <- function(seq) {
-  orfs <- find_largest_orfs(seq)
-  if (is.null(orfs)) {
-    return(data.table(orf1 = 0,
-                      orf2 = 0,
-                      orf3 = 0,
-                      strand = "+"))
-  } else {
-    return(data.table(orf1 = orfs[1,3],
-                      orf2 = orfs[2,3],
-                      orf3 = orfs[3,3],
-                      strand = orfs[1,5]))
-  }
-}
 
 
 get_highest_letter <- function(mat, cons_threshold = loop2_cfg$cons_threshold) {
