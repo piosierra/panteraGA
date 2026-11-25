@@ -173,7 +173,7 @@ rules_cfg <- list(
   unknown_orf_tsd_conf = 0.5, #   and a TSD in at least this fraction of the copies
   ltr_tsd_min = 4,        # LTR TSD length range, for reclassifying Unknowns as LTR
   ltr_tsd_max = 6,
-  tgca_tsd_conf = 0.8,    # Unknown with TG..CA ends: min TSD confidence to become LTR
+  tgca_tsd_conf = 0.5,    # Unknown with TG..CA ends: min TSD confidence (fraction of copies) to become LTR
   unknown_tsd_conf = 0.3, # Unknown with an LTR: min TSD confidence to become LTR
   unknown_ltr_min_len = 150 # Unknown: min LTR length to become LTR
 )
@@ -2705,10 +2705,14 @@ stats_tes <- function(final, genomes) {
     tes[is.na(TR2), TR2 := F]
     tes[TR2 == T & type == "LTR" & maxRep > rules_cfg$tandem_ltr_max, `:=`(pass = F, reason = "LTR structure, mostly tandem repeat")]
     # Reclassification by TSDs (not where most copies sit in a short tandem repeat: there the TSD length is
-    # the length of the match in the repeat, not of a duplication)
+    # the length of the match in the repeat, not of a duplication). TG..CA ends and a 4-6 bp TSD in at least half of
+    # the copies (rules_cfg$tgca_tsd_conf; was more than 0.8): in the 14 genome sets of patch 12, 13 elements with a
+    # TSD in 50-80% of the copies had become DNA by their short (8-11 bp) inverted repeats, and 11 of them match
+    # RepBase LTR consensi (solo LTRs; 6 over their whole length); 32 of 47 others that stayed Unknown do too.
+    # This comes before the TIR rule, so these elements are not called DNA.
     tg_ca <- tes[, grepl("#Unknown", name) & substr(seq, 1, 2) == "TG" &
                    substr(seq, lente - 1, lente) == "CA" &
-                   tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c > rules_cfg$tgca_tsd_conf &
+                   tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c >= rules_cfg$tgca_tsd_conf &
                    !(tsd_t >= tsd_cfg$tandem_frac)]
     tes[tg_ca, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
                     reason = "Unknown to LTR: TG..CA ends and TSD")]
@@ -2735,19 +2739,27 @@ stats_tes <- function(final, genomes) {
     # (removed: Unknown shorter than 400 bp with a polyA within 5 bp of an end).
     # Partner calls: non-autonomous derivatives take the partner's class with "-NA" and pass, also with low termini
     # identity (NA_low); solo LTRs and internal deletions of LINEs take the partner's class and are rejected.
-    # "{partner}" becomes the partner's final name.
+    # "{partner}" becomes the partner's final name. Calls to a DNA partner (DNA -NA) come last: after the other
+    # partner calls and the solo LTRs of -NA LTR elements below, and only for elements that no rule reclassified
+    # as another class (still Unknown, or DNA by their TIRs). The termini of an LTR (TG..CA, short inverted repeats)
+    # can match those of a DNA element, and confirmed solo LTRs (TG..CA ends, 4-6 bp TSD) had become DNA -NA.
     tes[, `:=`(partner = NA_character_, partner_type = NA_character_, partner_ident = NA_real_)]
-    tes[na_calls, on = "wid", `:=`(partner = i.partner, partner_type = i.partner_type, partner_ident = i.partner_ident)]
-    for (k in which(!is.na(tes$partner_type))) {
-      pc <- na_calls$partner_class[match(tes$wid[k], na_calls$wid)]
-      ty <- tes$partner_type[k]
-      set(tes, k, "name", paste0(tes$wid[k], "#", pc, if (ty %in% c("NA_high", "NA_low")) "-NA" else ""))
-      if (ty == "NA_high") set(tes, k, c("pass", "reason"), list(TRUE, "non-autonomous: termini of {partner}"))
-      if (ty == "NA_low") set(tes, k, c("pass", "reason"),
-                              list(TRUE, "non-autonomous (low termini identity): termini of {partner}"))
-      if (ty == "solo_LTR") set(tes, k, c("pass", "reason"), list(FALSE, "solo LTR of {partner}"))
-      if (ty == "internal_deletion") set(tes, k, c("pass", "reason"), list(FALSE, "internal deletion of {partner}"))
+    apply_partner_calls <- function(calls) {
+      if (nrow(calls) == 0) return(invisible(NULL))
+      tes[calls, on = "wid", `:=`(partner = i.partner, partner_type = i.partner_type, partner_ident = i.partner_ident)]
+      for (k in match(calls$wid, tes$wid)) {
+        pc <- calls$partner_class[match(tes$wid[k], calls$wid)]
+        ty <- tes$partner_type[k]
+        set(tes, k, "name", paste0(tes$wid[k], "#", pc, if (ty %in% c("NA_high", "NA_low")) "-NA" else ""))
+        if (ty == "NA_high") set(tes, k, c("pass", "reason"), list(TRUE, "non-autonomous: termini of {partner}"))
+        if (ty == "NA_low") set(tes, k, c("pass", "reason"),
+                                list(TRUE, "non-autonomous (low termini identity): termini of {partner}"))
+        if (ty == "solo_LTR") set(tes, k, c("pass", "reason"), list(FALSE, "solo LTR of {partner}"))
+        if (ty == "internal_deletion") set(tes, k, c("pass", "reason"), list(FALSE, "internal deletion of {partner}"))
+      }
     }
+    dna_call <- startsWith(na_calls$partner_class, "DNA")
+    apply_partner_calls(na_calls[!dna_call])
     na_n <- table(na_calls$partner_type)
     lx(paste("Partner calls by shared termini:", if (length(na_n)) paste(names(na_n), na_n, collapse = ", ") else "none"))
     # Second pass, solo LTRs of non-autonomous LTR elements: the -NA LTR elements of the first pass with terminal
@@ -2768,13 +2780,25 @@ stats_tes <- function(final, genomes) {
                   partner = solo2$partner, partner_type = "solo_LTR", partner_ident = solo2$partner_ident)]
     }
     lx(paste("Solo LTRs of non-autonomous LTR elements:", if (is.null(solo2)) 0 else nrow(solo2)))
+    # DNA -NA last (see above): only elements with no other partner call whose class is still Unknown or DNA
+    dna_calls <- na_calls[dna_call]
+    if (nrow(dna_calls) > 0) {
+      k <- match(dna_calls$wid, tes$wid)
+      cur <- gsub(".*#", "", tes$name[k])
+      ok <- is.na(tes$partner_type[k]) & (startsWith(cur, "Unknown") | startsWith(cur, "DNA"))
+      if (any(!ok)) lx(paste("DNA partner calls not applied, element already reclassified (",
+                             paste(names(table(cur[!ok])), table(cur[!ok]), collapse = ", "), "):", sum(!ok)))
+      apply_partner_calls(dna_calls[ok])
+    }
     tes[, wid := NULL]
     # Ends of a known DNA transposon, another protein inside: when the classifier's TIR end models or end partner
     # call a DNA superfamily at both ends (homology_ends) and the element's call is another class, the ends decide.
     # The element is a non-autonomous DNA transposon of that superfamily ("-NA") that carries the other protein, and
     # the reason names it. In Biomphalaria glabrata, 7 elements of 1.8-3.1 kb with hAT ends (14 bp TIRs, 8 bp TSD)
-    # were called LINE (I, RTE) on a reverse transcriptase alone and rejected.
-    ends_dna <- tes[, which(!is.na(hom_ends) & nzchar(hom_ends) & !startsWith(gsub(".*#", "", name), "DNA"))]
+    # were called LINE (I, RTE) on a reverse transcriptase alone and rejected. Like DNA partner calls, it comes after
+    # every other reclassification and leaves alone the elements reclassified as LTR or given a partner call.
+    ends_dna <- tes[, which(!is.na(hom_ends) & nzchar(hom_ends) & !startsWith(gsub(".*#", "", name), "DNA") &
+                              is.na(partner_type) & !grepl("^(Unknown to LTR|reclassified as LTR)", reason))]
     if (length(ends_dna) > 0) {
       tes[ends_dna, `:=`(reason = paste0("non-autonomous DNA: ", hom_ends, " ends, ",
                                          gsub(".*#", "", name), " protein inside"),
