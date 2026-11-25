@@ -2743,13 +2743,17 @@ stats_tes <- function(final, genomes) {
     # finder (good_tir only knows the BLAST calls made before that step)
     tes[grepl("#DNA", name) & type == "TIR" & lgap < rules_cfg$end_gap & rgap < rules_cfg$end_gap, `:=`(pass = T, reason = "DNA: TIRs")]
     tes[name %in% tir_reco$new, `:=`(pass = T, reason = "reclassified as DNA: matches a DNA element")]
-    # DNA elements with a superfamily from the classifier (protein, TIR end models or end partner; high or low
-    # confidence) are accepted without the structural TIR test: in 11 new genome pairs, 74 such elements failed it
-    # (no repeat found, a direct repeat found instead, or a TIR 8 bp or more from an end), among them high-confidence
-    # PiggyBac, Kolobok and hAT transposase calls and low-confidence (non-autonomous) TIR and partner calls.
-    tes[!pass & grepl("#DNA/", name) & hom_confidence %in% c("high", "low"),
-        `:=`(pass = T, reason = paste0("DNA: ", hom_evidence, " call"))]
     tes[grepl("#RC", name), `:=`(pass = T, reason = "RC")]
+    # A high or low homology call is enough: elements of any class (not Unknown) that no class structure rule
+    # accepted are accepted on their call ("<class>: <evidence> call"); the structure rules decide only for weak
+    # calls and Unknowns, and the rejection rules below (tandem, partners, Ns, microsatellites, copies, contained)
+    # still apply. In the 14 genome sets of patch 10, 32 such elements had been rejected: 18 LINEs with an ORF of
+    # 381-1473 nt (rules_cfg$line_min_orf), 7 Ngaro elements tested for LTRs, 2 Gypsy with 84-90 bp LTRs, a 639 bp
+    # SINE, and 4 LTR and DNA elements whose terminal repeats are not at the ends. (Patch 8 did this for DNA
+    # elements with a superfamily call only: 74 elements in 11 new genome pairs.)
+    by_call <- tes[, !pass & !startsWith(gsub(".*#", "", name), "Unknown") & hom_confidence %in% c("high", "low")]
+    tes[by_call, `:=`(pass = T, reason = paste0(sub("/.*", "", gsub(".*#", "", name)), ": ", hom_evidence, " call"))]
+    tes[, by_call := by_call]   # for the log at the end (later rules can still reject them)
     # Unknowns found at more than unknown_min_loci loci (orthologous copies, the same insertion in several genomes,
     # count once). This replaces a kneedle cut-off on the cluster sizes, which jumped between runs with nearly the
     # same cluster sizes (5 to 11 in Schmidtea mediterranea when a few consensi changed) and grew with the number of
@@ -2934,6 +2938,10 @@ stats_tes <- function(final, genomes) {
   }
   tes[, name := paste0(">", name)]
   
+  if ("by_call" %in% names(tes)) {
+    lx(paste("Elements accepted on their homology call alone (no structure rule accepted them):",
+             tes[, sum(by_call & pass & endsWith(reason, " call"), na.rm = TRUE)]))
+  }
   lx(paste("Elements accepted:", nrow(tes[pass == TRUE]), "; rejected:", nrow(tes[pass == FALSE])))
   # The library holds the accepted elements; the rejected ones go to their own file
   # (their reasons are in the stats file, which lists both)
