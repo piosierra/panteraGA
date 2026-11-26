@@ -175,7 +175,11 @@ rules_cfg <- list(
   ltr_tsd_max = 6,
   tgca_tsd_conf = 0.5,    # Unknown with TG..CA ends: min TSD confidence (fraction of copies) to become LTR
   unknown_tsd_conf = 0.3, # Unknown with an LTR: min TSD confidence to become LTR
-  unknown_ltr_min_len = 150 # Unknown: min LTR length to become LTR
+  unknown_ltr_min_len = 150, # Unknown: min LTR length to become LTR
+  tgca_near = 3,          # Unknown left by the TIR and LTR rules: TG within this many bases of the start and CA within
+                          #   this many of the end, with the TG..CA TSD conditions, becomes LTR (consensus edges 1-3 bp off)
+  split_gap_min = 100,    # DIRS-group calls (Ngaro, PAT): a direct repeat at one end that ends this many to
+  split_gap_max = 600     #   split_gap_max bp before the other end is a split direct repeat (A-pol-B-A-B)
 )
 
 # Partners by shared termini (stats_tes, na_partner_calls): an Unknown element whose two termini are those of
@@ -2543,7 +2547,17 @@ stats_tes <- function(final, genomes) {
                                   abs((lente.y - lente.x) / max(lente.y, lente.x)) < rules_cfg$dup_len_diff]
     te_data_dups[, uname := paste0(c(qseqid, sseqid)[order(c(qseqid, sseqid))], collapse = ""), .I]
     te_data_dups <- te_data_dups[order(cluster.x - cluster.y)]
-    dups_list <- te_data_dups[!duplicated(te_data_dups$uname)]$qseqid
+    # Pairs taken in this order; an element is removed only if the one it duplicates stays (removed pairwise, a chain
+    # A-B-C lost both A and B: 390 of 755 duplicates in 15 genome sets had no near-identical element left)
+    dpr <- te_data_dups[!duplicated(te_data_dups$uname), .(q = qseqid, s = sseqid)]
+    removed <- character(); kept <- character()
+    for (i in seq_len(nrow(dpr))) {
+      q <- dpr$q[i]; pp <- dpr$s[i]
+      if (q %in% removed || pp %in% removed) next
+      if (q %in% kept) { if (!(pp %in% kept)) { removed <- c(removed, pp); kept <- c(kept, q) }; next }
+      removed <- c(removed, q); kept <- c(kept, pp)
+    }
+    dups_list <- removed
     te_data_mix <- te_data_mix[!(qseqid %in% dups_list)]
     te_data_mix <- te_data_mix[!(sseqid %in% dups_list)]
     
@@ -2617,8 +2631,9 @@ stats_tes <- function(final, genomes) {
     te_data_mix_tir <- te_data_mix[(qseqid %in% good_tir | sseqid %in% good_tir) &
                                      lsgap < rules_cfg$end_gap & rsgap < rules_cfg$end_gap &
                                      lqgap < rules_cfg$end_gap & rqgap < rules_cfg$end_gap]
-    tir_reco1 <- te_data_mix_tir[!grepl("DNA", qseqid) & grepl("DNA", sseqid)]
-    tir_reco2 <- te_data_mix_tir[!grepl("DNA", sseqid) & grepl("DNA", qseqid)]
+    # Only Unknowns: a homology call is not overridden by similarity to another element
+    tir_reco1 <- te_data_mix_tir[grepl("#Unknown", qseqid) & grepl("DNA", sseqid)]
+    tir_reco2 <- te_data_mix_tir[grepl("#Unknown", sseqid) & grepl("DNA", qseqid)]
     tir_reco <- data.table(name = c(tir_reco1$qseqid, tir_reco2$sseqid), sf = gsub(".*#", "", c(tir_reco1$sseqid, tir_reco2$qseqid)))
     tir_reco <- tir_reco[!duplicated(name)]          # one new class per element
     lx(paste("Unknown elements reclassified as DNA:", nrow(tir_reco)))
@@ -2629,8 +2644,8 @@ stats_tes <- function(final, genomes) {
     te_data_mix_ltr <- te_data_mix[(qseqid %in% good_ltr | sseqid %in% good_ltr) &
                                      ((lsgap < rules_cfg$end_gap & rsgap < rules_cfg$end_gap) |
                                         (lqgap < rules_cfg$end_gap & rqgap < rules_cfg$end_gap))]
-    ltr_reco1 <- te_data_mix_ltr[!grepl("LTR", qseqid) & grepl("LTR", sseqid)]
-    ltr_reco2 <- te_data_mix_ltr[!grepl("LTR", sseqid) & grepl("LTR", qseqid)]
+    ltr_reco1 <- te_data_mix_ltr[grepl("#Unknown", qseqid) & grepl("LTR", sseqid)]
+    ltr_reco2 <- te_data_mix_ltr[grepl("#Unknown", sseqid) & grepl("LTR", qseqid)]
     ltr_reco <- data.table(name = c(ltr_reco1$qseqid, ltr_reco2$sseqid), sf = gsub(".*#", "", c(ltr_reco1$sseqid, ltr_reco2$qseqid)))
     ltr_reco <- ltr_reco[!duplicated(name)]          # one new class per element
     lx(paste("Unknown elements reclassified as LTR:", nrow(ltr_reco)))
@@ -2676,6 +2691,13 @@ stats_tes <- function(final, genomes) {
     tes[grepl("#PLE", name), `:=`(pass = T, reason = "PLE")]
     tes[grepl("#SINE", name) & lente < rules_cfg$sine_max_len, `:=`(pass = T, reason = "SINE: short")]
     tes[name %in% good_ltr, `:=`(pass = T, reason = "LTR: terminal LTRs")]
+    # DIRS group (Ngaro, PAT): a split direct repeat, the repeat at one end and its copy ending split_gap_min to
+    # split_gap_max bp before the other end (full zebrafish Ngaro: 200-470 bp). Confirms weak calls; high and low
+    # calls get this reason instead of the call's.
+    tes[grepl("#LTR/(Ngaro|DIRS)", name) & !pass & type == "LTR" & length > rules_cfg$ltr_min_len &
+          ((lgap < rules_cfg$end_gap & rgap >= rules_cfg$split_gap_min & rgap <= rules_cfg$split_gap_max) |
+             (rgap < rules_cfg$end_gap & lgap >= rules_cfg$split_gap_min & lgap <= rules_cfg$split_gap_max)),
+        `:=`(pass = T, reason = "DIRS: split direct repeats")]
     tes[name %in% ltr_reco$new, `:=`(pass = T, reason = "reclassified as LTR: matches an LTR element")]
     tes[name %in% good_tir, `:=`(pass = T, reason = "DNA: TIRs")]
     # DNA elements with a TIR near both ends, including TIRs found by the terminal-TIR
@@ -2729,6 +2751,18 @@ stats_tes <- function(final, genomes) {
     # unknown_orf_tsd_conf of the copies, target not in a short tandem repeat): an uncharacterised element with a
     # coding region, not noise. orf1 is in nucleotides. In the 14 genome sets of patch 9, 11 such elements: 8 in
     # Schmidtea mediterranea (0.9-1.05 kb ORFs), 2 of 8.3 kb in Biomphalaria glabrata (919 aa ORFs), 1 in Eledone.
+    # TG..CA near the ends: Unknowns the TIR and LTR rules left, with TG within tgca_near bases of the start and CA within
+    # tgca_near of the end, and the TSD of the TG..CA rule. Consensus edges can be 1-3 bp off the dinucleotides: in 15
+    # genome sets, 53 such Unknowns, 26 of them matching a RepBase or Dfam entry (all LTR, mostly full-length solo LTRs).
+    k <- rules_cfg$tgca_near
+    tg5 <- regexpr("TG", substr(tes$seq, 1, k + 2), fixed = TRUE)
+    ca3 <- stri_locate_last_fixed(substr(tes$seq, tes$lente - k - 1, tes$lente), "CA")[, 2]
+    tg_near <- tes[, grepl("#Unknown", name) & tg5 > 0 & !is.na(ca3) &
+                     tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c >= rules_cfg$tgca_tsd_conf &
+                     !(fifelse(is.na(tsd_t), 0, tsd_t) >= tsd_cfg$tandem_frac)] %in% TRUE
+    tes[tg_near, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
+                      reason = "Unknown to LTR: TG..CA near the ends and TSD")]
+    lx(paste("Unknown elements reclassified as LTR by TG..CA near the ends and TSD:", sum(tg_near)))
     long_orf <- tes[, grepl("#Unknown", name) & reason == "no rule accepts it" & orf1 >= rules_cfg$unknown_min_orf &
                       tsd_l > 0 & tsd_c >= rules_cfg$unknown_orf_tsd_conf &
                       !(fifelse(is.na(tsd_t), 0, tsd_t) >= tsd_cfg$tandem_frac) &
@@ -2785,7 +2819,12 @@ stats_tes <- function(final, genomes) {
     if (nrow(dna_calls) > 0) {
       k <- match(dna_calls$wid, tes$wid)
       cur <- gsub(".*#", "", tes$name[k])
-      ok <- is.na(tes$partner_type[k]) & (startsWith(cur, "Unknown") | startsWith(cur, "DNA"))
+      # ... or reclassified LTR only by its terminal repeats (direct repeats also occur in DNA elements, e.g. a Kolobok
+      # of Ostrea edulis with 449 bp direct terminal repeats) when the partner has a high or low protein call
+      pk <- match(dna_calls$partner, tes$wid)
+      prot_partner <- tes$hom_confidence[pk] %in% c("high", "low") & startsWith(fifelse(is.na(tes$hom_evidence[pk]), "", tes$hom_evidence[pk]), "protein")
+      ok <- is.na(tes$partner_type[k]) & (startsWith(cur, "Unknown") | startsWith(cur, "DNA") |
+                                            (tes$reason[k] == "Unknown to LTR: terminal LTRs and TSD" & prot_partner))
       if (any(!ok)) lx(paste("DNA partner calls not applied, element already reclassified (",
                              paste(names(table(cur[!ok])), table(cur[!ok]), collapse = ", "), "):", sum(!ok)))
       apply_partner_calls(dna_calls[ok])
