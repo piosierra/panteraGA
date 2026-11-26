@@ -173,7 +173,8 @@ rules_cfg <- list(
   unknown_orf_tsd_conf = 0.5, #   and a TSD in at least this fraction of the copies
   ltr_tsd_min = 4,        # LTR TSD length range, for reclassifying Unknowns as LTR
   ltr_tsd_max = 6,
-  tgca_tsd_conf = 0.5,    # Unknown with TG..CA ends: min TSD confidence (fraction of copies) to become LTR
+  tgca_tsd_conf = 0.33,   # Unknown with TG..CA exactly at the ends: min TSD confidence (fraction of copies) to become LTR
+  tgca_near_tsd_conf = 0.5, # the same for TG..CA near the ends (tgca_near)
   unknown_tsd_conf = 0.3, # Unknown with an LTR: min TSD confidence to become LTR
   unknown_ltr_min_len = 150, # Unknown: min LTR length to become LTR
   tgca_near = 3,          # Unknown left by the TIR and LTR rules: TG within this many bases of the start and CA within
@@ -2731,7 +2732,9 @@ stats_tes <- function(final, genomes) {
     # the copies (rules_cfg$tgca_tsd_conf; was more than 0.8): in the 14 genome sets of patch 12, 13 elements with a
     # TSD in 50-80% of the copies had become DNA by their short (8-11 bp) inverted repeats, and 11 of them match
     # RepBase LTR consensi (solo LTRs; 6 over their whole length); 32 of 47 others that stayed Unknown do too.
-    # This comes before the TIR rule, so these elements are not called DNA.
+    # This comes before the TIR rule, so these elements are not called DNA. One third of the copies is enough with
+    # TG..CA exactly at the ends: in 16 genome sets (with donkey and horse), 12 such Unknowns had a TSD in 33-50% of
+    # the copies, mostly old solo LTRs (horse LTR20, MER34); 10 match RepBase LTR entries, 2 partially, none DNA.
     tg_ca <- tes[, grepl("#Unknown", name) & substr(seq, 1, 2) == "TG" &
                    substr(seq, lente - 1, lente) == "CA" &
                    tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c >= rules_cfg$tgca_tsd_conf &
@@ -2758,7 +2761,7 @@ stats_tes <- function(final, genomes) {
     tg5 <- regexpr("TG", substr(tes$seq, 1, k + 2), fixed = TRUE)
     ca3 <- stri_locate_last_fixed(substr(tes$seq, tes$lente - k - 1, tes$lente), "CA")[, 2]
     tg_near <- tes[, grepl("#Unknown", name) & tg5 > 0 & !is.na(ca3) &
-                     tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c >= rules_cfg$tgca_tsd_conf &
+                     tsd_l >= rules_cfg$ltr_tsd_min & tsd_l <= rules_cfg$ltr_tsd_max & tsd_c >= rules_cfg$tgca_near_tsd_conf &
                      !(fifelse(is.na(tsd_t), 0, tsd_t) >= tsd_cfg$tandem_frac)] %in% TRUE
     tes[tg_near, `:=`(name = paste0(gsub("#.*", "", name), "#LTR"), pass = T,
                       reason = "Unknown to LTR: TG..CA near the ends and TSD")]
