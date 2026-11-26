@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.0]
+
+### Summary
+- Classification by homology with the HMM classifier and its libraries `pantera_hmm_v2` (Zenodo, doi:10.5281/zenodo.24543291), instead of blastp against RepeatMasker's peptide library and an XGBoost model. The peptide library and the model are no longer used or shipped.
+- Structural rules reviewed as one system: the homology call sets the class, structure confirms it or rescues Unknowns and weak calls (sections below, from "a homology call is enough" on).
+- With two genomes, one alignment instead of two.
 
 ### Changed (two genomes: one alignment)
 - With two genomes, panteraGA makes one FastGA alignment (genome 1 vs genome 2) instead of two, and takes the insertions of both genomes from it (svfind's two outputs, `-a` and `-b`; each filtered as before, with its own flank cut-off). With three or more genomes the ring is unchanged (`-a` of each alignment). With `-k`, a two-genome run needs only `<genome1>_<genome2>.1aln`.
