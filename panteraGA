@@ -463,15 +463,24 @@ rc_alignment <- function(f) {
 # genomes: genome file names (without folders), in the order of the alignments.
 parseONEview <- function(genomes) {
   n <- length(genomes)
-  lx(paste("Processing", n, "alignments"))
+  # Jobs: alignment, svfind output read (a or b) and the genome its insertions are in. With two genomes one alignment
+  # gives the insertions of both (svfind -a: in genome 1, -b: in genome 2); in a ring of three or more, -a of each
+  # alignment, so no insertion is read twice. On 15 genome pairs, one alignment gave 4% more genome-2 segments than
+  # the 2 vs 1 alignment and the same library (98% of accepted elements found again; differences at 3 loci).
+  jobs <- if (n == 2) data.table(aln = c(1L, 1L), side = c("a", "b"), g = c(1L, 2L)) else
+    data.table(aln = seq_len(n), side = "a", g = seq_len(n))
+  lx(paste("Processing", length(unique(jobs$aln)), if (n == 2) "alignment (insertions in both genomes)" else "alignments"))
   ovret <- data.table(name = character(), seq = character(), lx = numeric(), rx = numeric(), ov = numeric())
-  for (i in 1:n) {
+  for (k in seq_len(nrow(jobs))) {
+    i <- jobs$aln[k]; sd <- jobs$side[k]; gi <- jobs$g[k]
     f <- aln_path(genomes, i)
-    system2("svfind", args = paste0(" -x ", svfind_flank, " -s ", min(50, opt$min_size), " -f ", opt$flanking, " -a ",opt$output_folder,"/",opt$lib_name,"hapa",i," -b ",opt$output_folder,"/",opt$lib_name,"hapb",i, " ", f), stdout = FALSE, stderr = FALSE)
-    if (file.size(paste0(opt$output_folder,"/",opt$lib_name,"hapa",i))>0) {
-      ov <- fread(cmd = paste0("ONEview ",opt$output_folder,"/",opt$lib_name,"hapa",i), fill = T)
+    hap <- function(x) paste0(opt$output_folder, "/", opt$lib_name, "hap", x, i)
+    if (sd == "a" || !file.exists(hap("b")))
+      system2("svfind", args = paste0(" -x ", svfind_flank, " -s ", min(50, opt$min_size), " -f ", opt$flanking, " -a ", hap("a"), " -b ", hap("b"), " ", f), stdout = FALSE, stderr = FALSE)
+    if (file.exists(hap(sd)) && file.size(hap(sd))>0) {
+      ov <- fread(cmd = paste0("ONEview ", hap(sd)), fill = T)
         if (nrow(ov)>0) {
-          ov[,f:="a"]
+          ov[,f:=sd]
           sequences <- ov[V1=="S",2:3][,V2:=as.numeric(V2)]
           file <- ov[V1=="S",f]
           overhangs <- ov[V1=="Q",2:3][,V2:=as.numeric(V2)]
@@ -485,7 +494,7 @@ parseONEview <- function(genomes) {
           colnames(ovall) <- c("file","name","v_name", "v_start","v_end","s_name", "s_start","s_end", "flank_l", "flank_r", "seq_len","seq","ov_len","overhang", "lx", "rx")
           # Length of the insertion itself, without the flanks
           ovall[, ins_len := seq_len - lx - rx]
-          ovall[, name:=paste0(genomes[i],"#",v_name,":",v_start,"-",v_end),.I]
+          ovall[, name:=paste0(genomes[gi],"#",v_name,":",v_start,"-",v_end),.I]
           lx(paste("Total segments in 1aln =", nrow(ovall)))
           ## Remove segments that map to the same spot, we remove the last digit to account for small missmatches in the breakpoint
           ovall[,ins_point :=paste0(file,"-",s_name,":",substr(s_start,1,nchar(s_start)-1),"-",substr(s_end,1,nchar(s_end)-1))]
@@ -495,7 +504,7 @@ parseONEview <- function(genomes) {
 
           if (opt$debug) {
             fwrite(ovall[, .(flank_l, flank_r, seq_len)],
-                   paste0(opt$output_folder, "/flanks_", i, ".tsv"), sep = "\t")
+                   paste0(opt$output_folder, "/flanks_", i, if (sd == "b") "b", ".tsv"), sep = "\t")
           }
           
           if (opt$flank_auto) {
@@ -517,7 +526,7 @@ parseONEview <- function(genomes) {
           ovall[is.na(ov) ,ov:=1]
           ovall[ov < -seq_len ,ov:=1]
           ovall <- ovall[ov>0]
-          unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
+          if (n != 2 || sd == "b") unlink(list.files(path = opt$output_folder,pattern = paste0(opt$lib_name,"hap*"),full.names = T))
           ovall[, Ns := nchar(seq) - nchar(gsub("N", "", seq, ignore.case = TRUE))]
           ovall <- ovall[Ns <= (nchar(seq) * opt$max_ns)]
           lx(paste("Number of valid Ns segments =", nrow(ovall)))
@@ -1213,6 +1222,7 @@ make_alignments <- function(glist) {
     todo <- vapply(1:lgenomes, function(i) {
       !file.exists(aln_path(genomes, i)) && !file.exists(outf(paste0("pantera", i, ".1aln")))
     }, TRUE)
+    if (lgenomes == 2) todo[2] <- FALSE  # two genomes: one alignment, insertions of both read from it
     t_all <- Sys.time()
     for (k in 1:lgenomes) {
       # Genome k is in alignments k and k - 1 of the ring
@@ -1228,7 +1238,7 @@ make_alignments <- function(glist) {
     }
   }
   # Ring of pairwise alignments: 1 vs 2, 2 vs 3, ..., last vs 1
-  for (i in 1:lgenomes) {
+  for (i in if (lgenomes == 2) 1L else 1:lgenomes) {
     run_fastga(i, sources[i], sources[nxt(i)], aln_path(genomes, i), tempf,
                masked = opt$tandem_mask, names = genomes[c(i, nxt(i))])
   }

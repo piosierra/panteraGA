@@ -4,7 +4,7 @@
 
 panteraGA is the new version of [pantera](https://github.com/piosierra/pantera). It aligns two or more genomes with [FastGA](https://github.com/thegenemyers/FASTGA) and builds a library of transposable elements (TEs) from the polymorphic segments between them. It generates TE libraries in minutes for most species and can handle genomes over 10 Gb in a few hours.
 
-Rather than an all-vs-all alignment, genomes in the list are aligned pairwise in a ring (1 vs 2, 2 vs 3, ..., last vs 1), and the polymorphic segments from all the alignments are processed together.
+Rather than an all-vs-all alignment, genomes in the list are aligned pairwise in a ring (1 vs 2, 2 vs 3, ..., last vs 1), and the polymorphic segments from all the alignments are processed together. With two genomes there is a single alignment (1 vs 2), from which the polymorphic segments of both genomes are taken.
 
 ## Installation
 

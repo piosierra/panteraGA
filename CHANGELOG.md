@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed (two genomes: one alignment)
+- With two genomes, panteraGA makes one FastGA alignment (genome 1 vs genome 2) instead of two, and takes the insertions of both genomes from it (svfind's two outputs, `-a` and `-b`; each filtered as before, with its own flank cut-off). With three or more genomes the ring is unchanged (`-a` of each alignment). With `-k`, a two-genome run needs only `<genome1>_<genome2>.1aln`.
+- Results, 15 genome pairs (the 14 two-genome sets of the structural review and donkey/horse; `deliver/step18_one_alignment/README_one_alignment.md`): genome-2 segments 211,707 -> 220,508 (+4%); accepted elements 3,011 -> 3,023, with 97-98% of the accepted elements of each run found again and accepted in the other (the differences are mostly elements at 3 loci, the minimum); RepBase families among accepted elements 701 -> 705. Genome-1 segments are identical.
+- Speed: one FastGA alignment less, 0.75-8.3 min on these pairs (donkey/horse 4.8 min of a 51 min run).
+
 ### Changed (classification)
 - The classification by homology uses the HMM classifier (`scripts/pantera_classify.R`, libraries `pantera_hmm_v2`) instead of blastp against RepeatMasker's peptide library and the XGBoost model. Each consensus gets one call from protein domain HMMs, TIR end models and end partners, Helitron end models or SINE models, with a confidence (`high`, `low`, `weak`, `none`). The call's label becomes the class through `model/label_map.tsv` (RepeatMasker names, refined by the sub label when RepeatMasker has a name for it, e.g. `DNA/TcMar-Pogo`, `DNA/hAT-hobo`); without a call the class is `Unknown`. A protein sub label is not reported when it is the only lineage of its label that scored on the element (`class_cfg$min_sub_models`; with a single lineage modelled, every CR1 would be Zenon), except EnSpm under DNA/CMC (`class_cfg$single_sub_ok`): every EnSpm call fell on an EnSpm/CACTA element and none on Chapaev, so CACTA is `DNA/CMC-EnSpm`. The structure rules are unchanged.
 - Stats file: the columns `homology_class` and `homology_prob` are replaced by `homology_label`, `homology_confidence`, `homology_evidence`, `homology_sub`, `homology_domains`, `homology_alternatives`, `homology_flags` and `homology_notes` (README, "Classification").
