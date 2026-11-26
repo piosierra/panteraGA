@@ -15,7 +15,7 @@ if [ ! -x "$ENV_PREFIX/bin/Rscript" ]; then
   exit 1
 fi
 
-# HMM libraries (model/hmm): from the clone when unpacked there (pantera_hmm_v1.tar.gz -> model/hmm), otherwise
+# HMM libraries (model/hmm): from the clone when unpacked there (pantera_hmm_v2.tar.gz -> model/hmm), otherwise
 # from the installed package, whatever its version. The classifier and model/label_map.tsv always come from the
 # clone (next to the script).
 shopt -s nullglob

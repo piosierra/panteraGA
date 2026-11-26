@@ -29,7 +29,7 @@ singularity exec panteraGA.sif panteraGA -g genomes.txt -b mylib -o out
 
 ### From source
 
-Cloning the repository is only needed for development. The HMM libraries of the classifier are not stored in git: download `pantera_hmm_v1.tar.gz` (47 MB) <!-- TODO before 2.0.0: Zenodo record of pantera_hmm_v1 --> and unpack it as `model/hmm/` (`tar -xzf pantera_hmm_v1.tar.gz && mv pantera_hmm_v1 model/hmm`). The optional `pantera_hmm_v1_host.tar.gz` (60 MB, Swiss-Prot host proteins, needs DIAMOND) adds the `host_protein` flag; unpack it next to the first one, before moving the folder. The dependencies listed in [`recipes/panteraga/meta.yaml`](recipes/panteraga/meta.yaml) must be on the `PATH`.
+Cloning the repository is only needed for development. The HMM libraries of the classifier are not stored in git: download `pantera_hmm_v2.tar.gz` (51 MB, [doi:10.5281/zenodo.24543291](https://doi.org/10.5281/zenodo.24543291)) and unpack it as `model/hmm/` (`curl -LO https://zenodo.org/records/24543291/files/pantera_hmm_v2.tar.gz && tar -xzf pantera_hmm_v2.tar.gz && mv pantera_hmm_v2 model/hmm`). The optional host-protein part (Swiss-Prot host proteins, flag `host_protein`, needs DIAMOND) is not in the archive: `bash model/hmm/host_build/build_host_part.sh model/hmm` builds it (see the library's README). The dependencies listed in [`recipes/panteraga/meta.yaml`](recipes/panteraga/meta.yaml) must be on the `PATH`.
 
 panteraGA reads the classifier (`scripts/pantera_classify.R`) and its label map (`model/label_map.tsv`) from its own folder, and the HMM libraries from `model/hmm/` next to the script, or in the folder given by the `PANTERA_HOME` environment variable. `scripts/test_classifier.sh <library folder>` checks the classifier against an exact expected output.
 
@@ -93,7 +93,7 @@ Elements are named `<class>_<n>-<lib_name>#<class>`, numbered by length within e
 
 ## Classification
 
-Each consensus is classified by homology with the HMM classifier (`scripts/pantera_classify.R`, libraries `pantera_hmm_v1`), then checked and, for some classes, reclassified by its structure (terminal repeats, TSDs, tails, ORFs; the `reason` column of the stats says which rule decided). The classifier combines, in this order of precedence:
+Each consensus is classified by homology with the HMM classifier (`scripts/pantera_classify.R`, libraries `pantera_hmm_v2`), then checked and, for some classes, reclassified by its structure (terminal repeats, TSDs, tails, ORFs; the `reason` column of the stats says which rule decided). The classifier combines, in this order of precedence:
 
 1. protein domains: HMMs of TE protein domains (`hmmsearch --cut_ga`) on miniprot translations of curated TE proteins and on six-frame ORFs;
 2. TIR end models (DNA transposons) and end partners (ends shared with an autonomous DNA transposon of the same library or of a curated set);
@@ -160,7 +160,7 @@ In a test with the two haplotypes of gorilla chromosome 22 (T2T, 59 Mb, 36% in t
 
 SOON?
 
-The HMM libraries of the classifier: <!-- TODO before 2.0.0: Zenodo DOI of pantera_hmm_v1 --> (up to 1.4.1, the XGBoost classification model: doi:[10.5281/zenodo.22990589](https://doi.org/10.5281/zenodo.22990589))
+The HMM libraries of the classifier, pantera_hmm_v2: doi:[10.5281/zenodo.24543291](https://doi.org/10.5281/zenodo.24543291) (all versions: doi:[10.5281/zenodo.24543290](https://doi.org/10.5281/zenodo.24543290)) (up to 1.4.1, the XGBoost classification model: doi:[10.5281/zenodo.22990589](https://doi.org/10.5281/zenodo.22990589))
 
 ## Acknowledgements
 

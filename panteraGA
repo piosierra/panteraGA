@@ -19,7 +19,7 @@ if (!nzchar(Sys.getenv("TZ")) && file.exists("/etc/localtime") &&
 
 
 ###
-### Locate the installation folder (the one containing libs/ and model/).
+### Locate the installation folder (the one containing model/).
 ### normalizePath() is applied to the full script path so that symlinks such as
 ### $PREFIX/bin/panteraGA resolve to the real install location.
 ### The PANTERA_HOME environment variable overrides the detected location.
@@ -532,7 +532,7 @@ parseONEview <- function(genomes) {
 # Path of a file in the output folder
 outf <- function(...) file.path(opt$output_folder, ...)
 
-# Folder of the HMM classifier's libraries: the pantera_hmm_v1 folder, unpacked as model/hmm in pantera_home
+# Folder of the HMM classifier's libraries: the pantera_hmm_v2 folder, unpacked as model/hmm in pantera_home
 hmm_libdir <- function() file.path(pantera_home, "model", "hmm")
 
 # Reverse complement of a DNA sequence
@@ -890,7 +890,7 @@ init_pantera <- function() {
   }
 
   # The classifier and its label map (next to this script) and the HMM libraries (pantera_home/model/hmm, the
-  # pantera_hmm_v1 folder)
+  # pantera_hmm_v2 folder)
   for (f in c(file.path(pantera_code, "scripts", "pantera_classify.R"), file.path(pantera_code, "model", "label_map.tsv"),
               file.path(hmm_libdir(), "prot", "pantera_v5.cal.hmm.gz"))) {
     if (!file.exists(f)) {

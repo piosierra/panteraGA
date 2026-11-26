@@ -4,7 +4,7 @@
 # confidence class; 12 decoys: mRNAs, Rfam genes, shuffled windows). Expected output: test/hmm/expected_classification.tsv
 # (made by the Python caller of the classifier project, step 12). Run twice: default chunks, and chunks of 7
 # sequences (the result must not depend on the chunk size).
-# usage: scripts/test_classifier.sh <HMM library folder (pantera_hmm_v1)> [threads (default 4)]
+# usage: scripts/test_classifier.sh <HMM library folder (pantera_hmm_v2)> [threads (default 4)]
 # Needs on the PATH: Rscript (data.table, getopt), hmmsearch, nhmmer, miniprot, cmscan, cmfetch, cmalign, trf,
 # dustmasker, makeblastdb, blastn (and diamond if the library has the host-protein part).
 set -euo pipefail

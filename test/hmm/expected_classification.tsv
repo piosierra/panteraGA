@@ -1,9 +1,9 @@
 input_id	id	length	label	confidence	evidence	sub	sub_source	sub_models	domains	fits_type	prot_score	prot_lead	runner_up	tir	partner	helitron	sine	alternatives	flags	notes
-Maverick_1-aPleWal#DNA/Maverick	Maverick_1-aPleWal	19595	POLINTON/Maverick	high	protein				ATPase,INT,POLB	yes	1469.9	1337.9	LTR/Gypsy:132							
-Gypsy_81-aPleWal#LTR/Gypsy	Gypsy_81-aPleWal	19579	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	22	AP,GAG,INT,RH,RT	yes	1075.8	600.8	LTR/ERV1:475							
-Gypsy_168-aPleWal#LTR/Gypsy	Gypsy_168-aPleWal	19499	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	22	AP,GAG,INT,RH,RT	yes	1107.4	618.4	LTR/ERV1:489							
+Maverick_1-aPleWal#DNA/Maverick	Maverick_1-aPleWal	19595	POLINTON/Maverick	high	protein				ATPase,INT,POLB	yes	1469.9	1336.9	LTR/Gypsy:133							
+Gypsy_81-aPleWal#LTR/Gypsy	Gypsy_81-aPleWal	19579	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	23	AP,GAG,INT,RH,RT	yes	1075.5	600.5	LTR/ERV1:475							
+Gypsy_168-aPleWal#LTR/Gypsy	Gypsy_168-aPleWal	19499	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	23	AP,GAG,INT,RH,RT	yes	1106.4	617.4	LTR/ERV1:489							
 ERV1_50-aPleWal#LTR/ERV1	ERV1_50-aPleWal	18937	LTR/ERV1	high	protein				AP,ENV,GAG,INT,RH,RT	yes	1246.8	771.8	LTR/Orthoretrovirinae:475							
-Gypsy_328-aPleWal#LTR/Gypsy	Gypsy_328-aPleWal	18189	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	22	AP,GAG,INT,RH,RT	yes	1071.2	592.2	LTR/ERV1:479							
+Gypsy_328-aPleWal#LTR/Gypsy	Gypsy_328-aPleWal	18189	LTR/Gypsy	high	protein	Gmr1-Osvaldo-Cer2-3	protein	23	AP,GAG,INT,RH,RT	yes	1069.8	590.8	LTR/ERV1:479							
 PIF-Harbinger_75-aPleWal#DNA/PIF-Harbinger	PIF-Harbinger_75-aPleWal	17061	DNA/PIF-Harbinger	high	protein	Harbinger	protein	1	TPase	yes	179.0	151.0	DNA/ISL2EU:28							
 hAT_116-aPleWal#Unknown	hAT_116-aPleWal	12310		none																
 Unknown_2-aPleWal#LTR	Unknown_2-aPleWal	12105		none																

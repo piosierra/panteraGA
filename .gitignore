@@ -5,12 +5,9 @@
 panteraGA.Rproj
 .pantera.config
 
-# Model: downloaded from Zenodo (https://zenodo.org/records/22990589), never in git
-model/xgbmodel.ubj
-model/xgbmodel.big
+# HMM libraries of the classifier (pantera_hmm_v2.tar.gz from Zenodo, unpacked as model/hmm), never in git
 model/*.tar
 model/*.tar.gz
-# HMM libraries of the classifier (pantera_hmm_v1.tar.gz, unpacked as model/hmm), never in git
 model/hmm/
 
 # Runs and builds
